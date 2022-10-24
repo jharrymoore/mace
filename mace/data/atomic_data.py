@@ -86,6 +86,7 @@ class AtomicData(torch_geometric.data.Data):
     def from_config(
         cls, config: Configuration, z_table: AtomicNumberTable, cutoff: float
     ) -> "AtomicData":
+        print("config's cell", config.cell)
         edge_index, shifts, unit_shifts = get_neighborhood(
             positions=config.positions, cutoff=cutoff, pbc=config.pbc, cell=config.cell
         )

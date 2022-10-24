@@ -1,10 +1,15 @@
+from typing import List
 from e3nn.util import jit
 import torch
 import mace
 from mace.calculators.neighbour_list_torch import primitive_neighbor_list_torch
 from mace import data
 from mace.tools import torch_geometric, utils
+import ase
 
+
+
+# Load a series of models, that are in some state of being pretrained, evaluate them all on the input structure provided to forward, return avg energies, forces + stdev
 
 
 torch.set_default_dtype(torch.float64)
@@ -20,9 +25,9 @@ def compile_model(model_path):
 
 
 class MACE_openmm(torch.nn.Module):
-    def __init__(self, model_path, atoms_obj):
+    def __init__(self, model_paths: List[str], atoms_obj: ase.Atoms):
         super().__init__()
-        dat = compile_model(model_path)
+        dats = [compile_model(model_path) for model_path in model_paths]
         config = data.config_from_atoms(atoms_obj)
         data_loader = torch_geometric.dataloader.DataLoader(
             dataset=[
@@ -42,8 +47,8 @@ class MACE_openmm(torch.nn.Module):
         # batch_dict.pop("shifts")
         batch_dict.pop("weight")
         self.inp_dict = batch_dict
-        self.model = dat["model"]
-        self.r_max = dat["r_max"]
+        self.models = [dat["model"] for dat in dats]
+        self.r_max = dats[0]["r_max"]
 
     def forward(self, positions):
         sender, receiver, unit_shifts = primitive_neighbor_list_torch(
@@ -76,5 +81,12 @@ class MACE_openmm(torch.nn.Module):
         inp_dict_this_config["edge_index"] = edge_index
         # inp_dict_this_config["shifts"] = shifts
         # inp_dict_this_config[""] =
-        res = self.model(inp_dict_this_config)
-        return (res["energy"], res["forces"])
+        
+        # TODO: inefficient serial evaluation for now, we can do some fun vmap trickery here with functorch
+        results = [model(inp_dict_this_config) for model in self.models]
+
+        # compute stdev
+        std_e, mu_e  = torch.std_mean([res["energy"] for res in results])
+        std_f, mu_f = torch.std_mean([res["forces"] for res in results])
+        
+        return (std_e, std_f, mu_e, mu_f)

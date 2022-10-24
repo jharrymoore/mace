@@ -113,6 +113,7 @@ def primitive_neighbor_list_torch(
 
     # we don't handle other fancier cutoffs
     max_cutoff: float = cutoff
+    # device=torch.device('cuda')
 
     # We use a minimum bin size of 3 A
     bin_size = max(max_cutoff, 3)
@@ -154,6 +155,7 @@ def primitive_neighbor_list_torch(
         positions = torch.dot(scaled_positions_ic, cell)
     else:
         scaled_positions_ic = torch.linalg.solve(cell.T, positions.T).T
+    
     bin_index_ic = torch.floor(scaled_positions_ic * nbins_c).to(dtype=torch.long).to(device)
     cell_shift_ic = torch.zeros_like(bin_index_ic, device=device)
 
