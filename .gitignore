@@ -16,3 +16,14 @@ build/
 # IDE
 .idea/
 .vscode/
+
+
+*.pdb
+*.xyz
+*.sdf
+*.out
+*.sh
+*.pt
+*.txt
+*.log
+*.model

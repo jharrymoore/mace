@@ -3,7 +3,7 @@ from ase.calculators.calculator import Calculator, all_changes
 
 from mace import data
 from mace.tools import torch_geometric, torch_tools, utils
-
+from typing import List
 
 class MACECalculator(Calculator):
     """MACE ASE Calculator"""
@@ -66,9 +66,9 @@ class MACECalculator(Calculator):
 
         # store results
         self.results = {
-            "energy": energy * self.energy_units_to_eV,
+            "energy": mu_e * self.energy_units_to_eV,
             # force has units eng / len:
-            "forces": forces * (self.energy_units_to_eV / self.length_units_to_A),
-            "std_e": std_e * self.energy_units_to_eV 
+            "forces": mu_f * (self.energy_units_to_eV / self.length_units_to_A),
+            "std_e": std_e * self.energy_units_to_eV, 
             "std_f": std_f * (self.energy_units_to_eV / self.length_units_to_A)
         }

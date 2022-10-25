@@ -12,7 +12,7 @@ import ase
 # Load a series of models, that are in some state of being pretrained, evaluate them all on the input structure provided to forward, return avg energies, forces + stdev
 
 
-torch.set_default_dtype(torch.float64)
+torch.set_default_dtype(torch.float32)
 
 
 def compile_model(model_path):
