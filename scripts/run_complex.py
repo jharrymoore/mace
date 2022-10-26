@@ -39,13 +39,13 @@ def main(cplx: str, ligand: str, model_path: str):
     molecule = Molecule.from_file(ligand)
     cplx = PDBFile(cplx)
     modeller = Modeller(cplx.topology, cplx.positions)
-    cplx_top = cplx.topology
-    atoms = read(ligand)
+    ligand_xyz = ligand.split(".")[0] + ".xyz"
+    atoms = read(ligand_xyz)
 
     forcefield = ForceField(
         "amber/protein.ff14SB.xml",
         "amber/tip3p_standard.xml",
-        "amber/tip3p_HFE_multivalent.xml",
+        # "amber/tip3p_HFE_multivalent.xml",
     )
     smirnoff = SMIRNOFFTemplateGenerator(molecules=molecule)
     forcefield.registerTemplateGenerator(smirnoff.generator)
@@ -59,32 +59,13 @@ def main(cplx: str, ligand: str, model_path: str):
     chains = list(modeller.topology.chains())
     print(chains)
     ml_atoms = [atom.index for atom in chains[3].atoms()]
-    print(len(atoms))
     print(f"selected {len(ml_atoms)} atoms for evaluation by the ML potential")
     assert len(ml_atoms) == len(atoms)
     potential = MLPotential("mace")
     system = potential.createMixedSystem(
         modeller.topology, mm_system, ml_atoms, atoms_obj=atoms
     )
-    # off_topology = molecule.to_topology()
-    # omm_top = off_topology.to_openmm()
-    # system = forcefield.createSystem(omm_top)
-    # TODO: we need a better way to remove the MM forces
-    # while system.getNumForces() > 0:
-    #     system.removeForce(0)
 
-    # now turn off the parameters for the small molecule
-    # atoms = read(filename)
-    # model = torch.load(model_path)
-    # model = jit.compile(model)
-    # print("MACE model compiled")
-
-    # openmm_calc = MACE_openmm2(model_path, atoms)
-    # jit.script(openmm_calc).save("md_test_model.pt")
-    # force = TorchForce("md_test_model.pt")
-    # force.setOutputsForces(True)
-
-    # system.addForce(force)
     print("Preparing OpenMM Simulation...")
 
     temperature = 298.15 * kelvin
@@ -97,15 +78,16 @@ def main(cplx: str, ligand: str, model_path: str):
         system,
         integrator,
         platform=platform,
+        platformProperties={"Precision": "single"},
     )
     simulation.context.setPositions(modeller.getPositions())
     print("Minimising energy")
     # TODO: this is getting a float64 for some reason and failing
-    # simulation.minimizeEnergy()
+    simulation.minimizeEnergy()
 
     reporter = StateDataReporter(
         file=sys.stdout,
-        reportInterval=1000,
+        reportInterval=1,
         step=True,
         time=True,
         potentialEnergy=True,
@@ -113,7 +95,7 @@ def main(cplx: str, ligand: str, model_path: str):
         speed=True,
     )
     simulation.reporters.append(reporter)
-    simulation.reporters.append(PDBReporter("output_complex.pdb", 1))
+    # simulation.reporters.append(PDBReporter("output_complex.pdb", 1))
 
     simulation.step(1000)
     state = simulation.context.getState(getEnergy=True)

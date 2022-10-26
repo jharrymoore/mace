@@ -117,10 +117,11 @@ class MACE_openmm2(torch.nn.Module):
 
     def forward(self, positions):
         # openMM hands over the entire topology to the forward model, we need to select the subset involved in the ML computation
-        positions = positions[self.atom_indices]
-        print(f"Model got positions shape {positions.shape}")
+        positions = (
+            positions[self.atom_indices] if self.atom_indices is not None else positions
+        )
         bbatch = torch.zeros(positions.shape[0], dtype=torch.long, device=self.device)
-        mapping, batch_mapping, shifts_idx = compute_neighborlist_n2(
+        mapping, batch_mapping, shifts_idx = compute_neighborlist(
             self.r_max,
             positions.to(self.device),
             self.inp_dict["cell"],
@@ -149,7 +150,6 @@ class MACE_openmm2(torch.nn.Module):
         inp_dict_this_config["edge_index"] = edge_index
         inp_dict_this_config["shifts"] = shifts_idx
         # inp_dict_this_config["shifts"] = shifts
-        print(inp_dict_this_config["shifts"].shape)
         # inp_dict_this_config[""] =
         res = self.model(inp_dict_this_config)
         return (res["energy"], res["forces"])
@@ -182,6 +182,8 @@ class MacePotentialImpl(MLPotentialImpl):
         model = torch.load(filename)
         model = jit.compile(model)
         print("MACE model compiled")
+        # TODO: this should take a topology
+        # A bit hacky to add the atoms object like this
         openmm_calc = MACE_openmm2(filename, atom_indices=atoms, **args)
         jit.script(openmm_calc).save("md_test_mace.pt")
         force = TorchForce("md_test_mace.pt")
