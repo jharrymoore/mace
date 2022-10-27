@@ -254,6 +254,7 @@ class ScaleShiftMACE(MACE):
         compute_stress: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
         # Setup
+
         data["positions"].requires_grad_(True)
         num_graphs = data["ptr"].numel() - 1
         displacement = torch.zeros(
@@ -276,7 +277,9 @@ class ScaleShiftMACE(MACE):
             )
 
         # Atomic energies
-        node_e0 = self.atomic_energies_fn(data["node_attrs"])
+        node_e0 = self.atomic_energies_fn(
+            data["node_attrs"].to(data["positions"].device)
+        )
         e0 = scatter_sum(
             src=node_e0, index=data["batch"], dim=-1, dim_size=num_graphs
         )  # [n_graphs,]
@@ -320,7 +323,7 @@ class ScaleShiftMACE(MACE):
         )  # [n_graphs,]
 
         # Add E_0 and (scaled) interaction energy
-        total_energy = e0 + inter_e
+        total_energy = (e0 + inter_e) * 96.486
 
         forces, virials, stress = get_outputs(
             energy=inter_e,

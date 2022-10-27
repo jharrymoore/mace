@@ -25,10 +25,10 @@ def main(filename: str, model_path: str):
     # load a starting configuration into an openmm system object
     platform = Platform.getPlatformByName("CUDA")
     molecule = Molecule.from_file(filename)
-
+    mol_xyz = filename.split(".")[0] + ".xyz"
     off_topology = molecule.to_topology()
     omm_top = off_topology.to_openmm()
-    atoms = read(filename)
+    atoms = read(mol_xyz)
 
     mace_potential = MLPotential("mace")
 
@@ -42,8 +42,15 @@ def main(filename: str, model_path: str):
     timeStep = 1 * femtosecond
     integrator = LangevinMiddleIntegrator(temperature, frictionCoeff, timeStep)
 
-    simulation = Simulation(omm_top, system, integrator, platform=platform)
-    simulation.context.setPositions(atoms.positions)
+    simulation = Simulation(
+        omm_top,
+        system,
+        integrator,
+        platform=platform,
+        platformProperties={"Precision": "Single"},
+    )
+    simulation.context.setPositions(atoms.positions / 10)
+    simulation.minimizeEnergy()
 
     reporter = StateDataReporter(
         file=sys.stdout,
@@ -55,7 +62,7 @@ def main(filename: str, model_path: str):
         speed=True,
     )
     simulation.reporters.append(reporter)
-    simulation.reporters.append(PDBReporter("output.pdb", 1))
+    simulation.reporters.append(PDBReporter("output_mlpot.pdb", 100))
 
     simulation.step(10000)
     state = simulation.context.getState(getEnergy=True)

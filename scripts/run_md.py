@@ -18,7 +18,7 @@ from openmmforcefields.generators import SMIRNOFFTemplateGenerator
 
 torch.set_default_dtype(torch.float32)
 
-
+# Note: this is the old implementation, this can be setup more cleanly with run_md_mlpotential.py
 def main(filename: str, model_path: str):
     # load a starting configuration into an openmm system object
     platform = Platform.getPlatformByName("CUDA")
@@ -26,7 +26,6 @@ def main(filename: str, model_path: str):
 
     atoms = read(filename)
 
-    # I think we have to parametrise the thing first, even if we are going to immediately replace the thing
     forcefield = ForceField(
         "amber/protein.ff14SB.xml",
         "amber/tip3p_standard.xml",

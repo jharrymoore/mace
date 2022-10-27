@@ -52,8 +52,8 @@ class CheckpointPathInfo:
 
 class CheckpointIO:
     def __init__(
-         self, directory: str, tag: str, keep: bool = False, swa_start: int = None
-     ) -> None:
+        self, directory: str, tag: str, keep: bool = False, swa_start: int = None
+    ) -> None:
         self.directory = directory
         self.tag = tag
         self.keep = keep
@@ -95,8 +95,8 @@ class CheckpointIO:
             rf"^(?P<tag>.+){self._epochs_string}(?P<epochs>\d+)\.{self._filename_extension}$"
         )
         regex2 = re.compile(
-             rf"^(?P<tag>.+){self._epochs_string}(?P<epochs>\d+)_swa\.{self._filename_extension}$"
-         )
+            rf"^(?P<tag>.+){self._epochs_string}(?P<epochs>\d+)_swa\.{self._filename_extension}$"
+        )
         match = regex.match(filename)
         match2 = regex2.match(filename)
         swa = False
@@ -148,7 +148,7 @@ class CheckpointIO:
 
     def save(
         self, checkpoint: Checkpoint, epochs: int, keep_last: bool = False
-        ) -> None:
+    ) -> None:
         if not self.keep and self.old_path and not keep_last:
             logging.debug(f"Deleting old checkpoint file: {self.old_path}")
             os.remove(self.old_path)

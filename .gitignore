@@ -27,3 +27,4 @@ build/
 *.txt
 *.log
 *.model
+*.sh

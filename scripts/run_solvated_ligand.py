@@ -1,9 +1,9 @@
 import sys
 from ase.io import read
+from openmmtorch import TorchForce
 import torch
-import numpy as np
-
-# from mace.calculators import MACE_openmm2
+from e3nn.util import jit
+from mace.calculators import MACE_openmm2
 
 import sys
 from openmm import LangevinMiddleIntegrator, Platform, Vec3
@@ -12,44 +12,53 @@ from openmm.app import (
     StateDataReporter,
     ForceField,
     PDBReporter,
-    PDBFile,
-    HBonds,
     Modeller,
     PME,
+    HBonds,
 )
-from openmm.unit import nanometer, nanometers, molar
-from openmm.unit import kelvin, picosecond, femtosecond, kilojoule_per_mole
+from openmm.unit import (
+    kelvin,
+    picosecond,
+    femtosecond,
+    kilojoule_per_mole,
+    nanometer,
+    nanometers,
+    angstrom,
+    molar,
+)
 from openff.toolkit.topology import Molecule
 from openmmforcefields.generators import SMIRNOFFTemplateGenerator
-from mace.calculators.openmm import MacePotentialImplFactory
 from openmmml import MLPotential
+from mace.calculators.openmm import MacePotentialImplFactory
 
 # we would like to parametrise a full protein ligand system
 
 
-# register the impl factory so we can call it later
 MLPotential.registerImplFactory("mace", MacePotentialImplFactory())
-torch.set_default_dtype(torch.float32)
+torch.set_default_dtype(torch.float64)
 
 
-def main(cplx: str, ligand: str):
+def main(filename: str):
     # load a starting configuration into an openmm system object
-    platform = Platform.getPlatformByName("CUDA")
-    molecule = Molecule.from_file(ligand)
-    cplx = PDBFile(cplx)
-    modeller = Modeller(cplx.topology, cplx.positions)
-    ligand_xyz = ligand.split(".")[0] + ".xyz"
-    atoms = read(ligand_xyz)
-
+    platform = Platform.getPlatformByName("CPU")
+    molecule = Molecule.from_file(filename)
+    off_topology = molecule.to_topology()
+    omm_top = off_topology.to_openmm()
+    atoms_xyz = filename.split(".")[0] + ".xyz"
+    atoms = read(atoms_xyz)
+    # nudge the atoms into the middle of the box
+    atoms.set_positions(atoms.positions + [20, 20, 20])
+    # convert positions from angstrom to nm for openMM
+    print(atoms.positions)
+    modeller = Modeller(omm_top, atoms.positions / 10)
     forcefield = ForceField(
-        "amber/protein.ff14SB.xml",
         "amber/tip3p_standard.xml",
         # "amber/tip3p_HFE_multivalent.xml",
     )
     smirnoff = SMIRNOFFTemplateGenerator(molecules=molecule)
     forcefield.registerTemplateGenerator(smirnoff.generator)
     modeller.addSolvent(
-        forcefield, padding=1.2 * nanometers, neutralize=True, ionicStrength=0.1 * molar
+        forcefield, padding=0.0 * nanometers, neutralize=True, ionicStrength=0.1 * molar
     )
     mm_system = forcefield.createSystem(
         modeller.topology,
@@ -57,59 +66,60 @@ def main(cplx: str, ligand: str):
         nonbondedCutoff=1 * nanometer,
         constraints=HBonds,
     )
+    omm_box_vecs = modeller.topology.getPeriodicBoxVectors()
+    print("Box size", omm_box_vecs[0][0].value_in_unit(angstrom))
+
+    atoms.set_cell(
+        [
+            omm_box_vecs[0][0].value_in_unit(angstrom),
+            omm_box_vecs[1][1].value_in_unit(angstrom),
+            omm_box_vecs[2][2].value_in_unit(angstrom),
+        ]
+    )
+    mace_potential = MLPotential("mace")
     chains = list(modeller.topology.chains())
     print(chains)
-    ml_atoms = [atom.index for atom in chains[3].atoms()]
-    print(f"selected {len(ml_atoms)} atoms for evaluation by the ML potential")
+    ml_atoms = [atom.index for atom in chains[0].atoms()]
     assert len(ml_atoms) == len(atoms)
-    potential = MLPotential("mace")
-    system = potential.createMixedSystem(
+    system = mace_potential.createMixedSystem(
         modeller.topology, mm_system, ml_atoms, atoms_obj=atoms
     )
-
+    print(system)
     print("Preparing OpenMM Simulation...")
 
     temperature = 298.15 * kelvin
     frictionCoeff = 1 / picosecond
-    timeStep = 1 * femtosecond
+    timeStep = 0.1 * femtosecond
     integrator = LangevinMiddleIntegrator(temperature, frictionCoeff, timeStep)
+    # integrator.setRandomNumberSeed(42)
 
     simulation = Simulation(
         modeller.topology,
         system,
         integrator,
         platform=platform,
-        platformProperties={"Precision": "Single"},
+        # platformProperties={"Precision": "Mixed"},
     )
     simulation.context.setPositions(modeller.getPositions())
-    state = simulation.context.getState(
-        getEnergy=True,
-        getVelocities=True,
-        getParameterDerivatives=True,
-        getForces=True,
-        getPositions=True,
-    )
-    with open("init_pos.pdb", "w") as f:
-        PDBFile.writeFile(modeller.topology, modeller.getPositions(), f)
-
-    print("Minimising energy")
+    state = simulation.context.getState(getEnergy=True)
+    print(state.getForces(asNumpy=True))
+    print(state.getKineticEnergy())
+    print(state.getVelocities(asNumpy=True))
     simulation.minimizeEnergy()
 
     reporter = StateDataReporter(
         file=sys.stdout,
-        reportInterval=1000,
+        reportInterval=100,
         step=True,
         time=True,
         potentialEnergy=True,
         temperature=True,
         speed=True,
     )
+    simulation.reporters.append(PDBReporter("output_solvated_test_mol_large.pdb", 1000))
     simulation.reporters.append(reporter)
-    simulation.reporters.append(
-        PDBReporter("output_complex.pdb", 100, enforcePeriodicBox=True)
-    )
 
-    simulation.step(100000)
+    simulation.step(1000000)
     state = simulation.context.getState(getEnergy=True)
     energy_2 = state.getPotentialEnergy().value_in_unit(kilojoule_per_mole)
     print(energy_2)

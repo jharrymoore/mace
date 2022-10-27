@@ -8,7 +8,6 @@ from mace.tools import torch_geometric, utils
 import ase
 
 
-
 # Load a series of models, that are in some state of being pretrained, evaluate them all on the input structure provided to forward, return avg energies, forces + stdev
 
 
@@ -81,12 +80,12 @@ class MACE_openmm(torch.nn.Module):
         inp_dict_this_config["edge_index"] = edge_index
         # inp_dict_this_config["shifts"] = shifts
         # inp_dict_this_config[""] =
-        
+
         # TODO: inefficient serial evaluation for now, we can do some fun vmap trickery here with functorch
         results = [model(inp_dict_this_config) for model in self.models]
 
         # compute stdev
-        std_e, mu_e  = torch.std_mean([res["energy"] for res in results])
+        std_e, mu_e = torch.std_mean([res["energy"] for res in results])
         std_f, mu_f = torch.std_mean([res["forces"] for res in results])
-        
+
         return (std_e, std_f, mu_e, mu_f)

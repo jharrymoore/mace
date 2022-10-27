@@ -9,7 +9,8 @@ from typing import Optional, Iterable
 import openmm
 from openmmtorch import TorchForce
 from openmmml.mlpotential import MLPotential, MLPotentialImpl, MLPotentialImplFactory
-
+from ase import Atoms
+from openmm.app import Topology
 
 # torch.set_default_dtype(torch.float64)
 
@@ -60,6 +61,7 @@ class MACE_openmm(torch.nn.Module):
             use_scaled_positions=False,  # positions are not scaled positions
             device="cpu",
         )
+        # openMM passes positions in nanometers
         # Eliminate self-edges that don't cross periodic boundaries
         true_self_edge = sender == receiver
         true_self_edge &= torch.all(unit_shifts == 0, dim=1)
@@ -85,13 +87,21 @@ class MACE_openmm(torch.nn.Module):
 
 
 class MACE_openmm2(torch.nn.Module):
-    def __init__(self, model_path, atom_indices, atoms_obj):
+    def __init__(
+        self,
+        model_path: str,
+        atom_indices: Optional[Iterable] = None,
+        atoms_obj: Optional[Atoms] = None,
+        topology: Optional[Topology] = None,
+    ):
         super().__init__()
+        assert atoms_obj is not None or topology is not None
 
         self.device = torch.device("cuda")
         self.atom_indices = atom_indices
 
         dat = compile_model(model_path)
+        # TODO: if only the topology was passed, create the config from this
         config = data.config_from_atoms(atoms_obj)
         data_loader = torch_geometric.dataloader.DataLoader(
             dataset=[
@@ -115,18 +125,21 @@ class MACE_openmm2(torch.nn.Module):
         self.model = dat["model"]
         self.r_max = dat["r_max"]
 
-    def forward(self, positions):
+    def forward(self, positions, boxVectors):
         # openMM hands over the entire topology to the forward model, we need to select the subset involved in the ML computation
         positions = (
             positions[self.atom_indices] if self.atom_indices is not None else positions
         )
+        positions = positions * 10
+        boxVectors = boxVectors * 10
+        boxVectors = boxVectors.type(torch.float32).to(self.device)
         bbatch = torch.zeros(positions.shape[0], dtype=torch.long, device=self.device)
         mapping, batch_mapping, shifts_idx = compute_neighborlist(
-            self.r_max,
-            positions.to(self.device),
-            self.inp_dict["cell"],
-            torch.tensor([False, False, False], device=self.device),
-            bbatch,
+            cutoff=self.r_max,
+            pos=positions.to(self.device),
+            cell=boxVectors,
+            pbc=torch.tensor([True, True, True], device=self.device),
+            batch=bbatch,
             self_interaction=True,
         )
 
@@ -146,13 +159,14 @@ class MACE_openmm2(torch.nn.Module):
         # D = positions[j]-positions[i]+S.dot(cell)
         # shifts = torch.dot(unit_shifts, self.inp_dict["cell"])  # [n_edges, 3]
         inp_dict_this_config = self.inp_dict.copy()
-        inp_dict_this_config["positions"] = positions
+        inp_dict_this_config["positions"] = positions.to(self.device)
         inp_dict_this_config["edge_index"] = edge_index
         inp_dict_this_config["shifts"] = shifts_idx
         # inp_dict_this_config["shifts"] = shifts
         # inp_dict_this_config[""] =
         res = self.model(inp_dict_this_config)
-        return (res["energy"], res["forces"])
+        # return (res["energy"], res["forces"])
+        return res["energy"]
 
 
 class MacePotentialImplFactory(MLPotentialImplFactory):
@@ -187,6 +201,7 @@ class MacePotentialImpl(MLPotentialImpl):
         openmm_calc = MACE_openmm2(filename, atom_indices=atoms, **args)
         jit.script(openmm_calc).save("md_test_mace.pt")
         force = TorchForce("md_test_mace.pt")
-        force.setOutputsForces(True)
+        # force.setOutputsForces(True)
+        force.setUsesPeriodicBoundaryConditions(True)
         # modify the system in place to add the force
         system.addForce(force)

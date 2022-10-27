@@ -24,7 +24,6 @@ from mace import data, modules, tools
 from mace.tools import torch_geometric
 
 
-
 def main() -> None:
     args = tools.build_default_arg_parser().parse_args()
     tag = tools.get_tag(name=args.name, seed=args.seed)
@@ -184,7 +183,6 @@ def main() -> None:
         avg_num_neighbors=args.avg_num_neighbors,
         atomic_numbers=z_table.zs,
     )
-
 
     # TODO: do we need to do this, or shall we simply allow the models to be initailly trained manually, then simply manage loading them into the ensemble calculators here?
 

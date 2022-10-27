@@ -5,6 +5,7 @@ from mace import data
 from mace.tools import torch_geometric, torch_tools, utils
 from typing import List
 
+
 class MACECalculator(Calculator):
     """MACE ASE Calculator"""
 
@@ -22,7 +23,9 @@ class MACECalculator(Calculator):
         Calculator.__init__(self, **kwargs)
         self.results = {}
 
-        self.models = [torch.load(f=model_path, map_location=device) for model_path in model_paths]
+        self.models = [
+            torch.load(f=model_path, map_location=device) for model_path in model_paths
+        ]
         self.r_max = self.model.r_max
         self.device = torch_tools.init_device(device)
         self.energy_units_to_eV = energy_units_to_eV
@@ -61,14 +64,18 @@ class MACECalculator(Calculator):
 
         # predict + extract data
         outs = [model(batch) for model in self.models]
-        std_f, mu_f = torch.std_mean([out["forces"].detach().cpu().numpy() for out in outs])
-        std_e, mu_e = torch.std_mean([out["energy"].detach().cpu().item()for out in outs])
+        std_f, mu_f = torch.std_mean(
+            [out["forces"].detach().cpu().numpy() for out in outs]
+        )
+        std_e, mu_e = torch.std_mean(
+            [out["energy"].detach().cpu().item() for out in outs]
+        )
 
         # store results
         self.results = {
             "energy": mu_e * self.energy_units_to_eV,
             # force has units eng / len:
             "forces": mu_f * (self.energy_units_to_eV / self.length_units_to_A),
-            "std_e": std_e * self.energy_units_to_eV, 
-            "std_f": std_f * (self.energy_units_to_eV / self.length_units_to_A)
+            "std_e": std_e * self.energy_units_to_eV,
+            "std_f": std_f * (self.energy_units_to_eV / self.length_units_to_A),
         }
