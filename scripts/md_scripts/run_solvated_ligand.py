@@ -1,12 +1,9 @@
 import sys
 from ase.io import read
-from openmmtorch import TorchForce
 import torch
-from e3nn.util import jit
-from mace.calculators import MACE_openmm2
 
 import sys
-from openmm import LangevinMiddleIntegrator, Platform, Vec3
+from openmm import LangevinMiddleIntegrator, Platform
 from openmm.app import (
     Simulation,
     StateDataReporter,
@@ -31,25 +28,18 @@ from openmmforcefields.generators import SMIRNOFFTemplateGenerator
 from openmmml import MLPotential
 from mace.calculators.openmm import MacePotentialImplFactory
 
-# we would like to parametrise a full protein ligand system
-
-
 MLPotential.registerImplFactory("mace", MacePotentialImplFactory())
-torch.set_default_dtype(torch.float64)
+torch.set_default_dtype(torch.float32)
+platform = Platform.getPlatformByName("CUDA")
 
 
 def main(filename: str):
     # load a starting configuration into an openmm system object
-    platform = Platform.getPlatformByName("CPU")
     molecule = Molecule.from_file(filename)
     off_topology = molecule.to_topology()
     omm_top = off_topology.to_openmm()
     atoms_xyz = filename.split(".")[0] + ".xyz"
     atoms = read(atoms_xyz)
-    # nudge the atoms into the middle of the box
-    atoms.set_positions(atoms.positions + [20, 20, 20])
-    # convert positions from angstrom to nm for openMM
-    print(atoms.positions)
     modeller = Modeller(omm_top, atoms.positions / 10)
     forcefield = ForceField(
         "amber/tip3p_standard.xml",
@@ -58,7 +48,7 @@ def main(filename: str):
     smirnoff = SMIRNOFFTemplateGenerator(molecules=molecule)
     forcefield.registerTemplateGenerator(smirnoff.generator)
     modeller.addSolvent(
-        forcefield, padding=0.0 * nanometers, neutralize=True, ionicStrength=0.1 * molar
+        forcefield, padding=1.5 * nanometers, neutralize=True, ionicStrength=0.1 * molar
     )
     mm_system = forcefield.createSystem(
         modeller.topology,
@@ -84,12 +74,11 @@ def main(filename: str):
     system = mace_potential.createMixedSystem(
         modeller.topology, mm_system, ml_atoms, atoms_obj=atoms
     )
-    print(system)
     print("Preparing OpenMM Simulation...")
 
     temperature = 298.15 * kelvin
     frictionCoeff = 1 / picosecond
-    timeStep = 0.1 * femtosecond
+    timeStep = 1 * femtosecond
     integrator = LangevinMiddleIntegrator(temperature, frictionCoeff, timeStep)
     # integrator.setRandomNumberSeed(42)
 
@@ -98,13 +87,10 @@ def main(filename: str):
         system,
         integrator,
         platform=platform,
-        # platformProperties={"Precision": "Mixed"},
+        # platformProperties={"Precision": "Single"},
     )
     simulation.context.setPositions(modeller.getPositions())
-    state = simulation.context.getState(getEnergy=True)
-    print(state.getForces(asNumpy=True))
-    print(state.getKineticEnergy())
-    print(state.getVelocities(asNumpy=True))
+    print("Minimising energy")
     simulation.minimizeEnergy()
 
     reporter = StateDataReporter(
