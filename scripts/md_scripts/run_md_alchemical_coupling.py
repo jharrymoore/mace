@@ -19,7 +19,7 @@ from openmm.app import (
     Modeller,
     PME,
 )
-from openmm.unit import nanometer, nanometers, molar
+from openmm.unit import nanometer, nanometers, molar, amu
 from openmm.unit import kelvin, picosecond, femtosecond, kilojoule_per_mole
 from openff.toolkit.topology import Molecule
 from openmmforcefields.generators import SMIRNOFFTemplateGenerator
@@ -71,6 +71,8 @@ def main():
         nonbondedMethod=PME,
         nonbondedCutoff=1 * nanometer,
         constraints=HBonds,
+        rigidWater=True,
+        hydrogenMass=4*amu
     )
     chains = list(modeller.topology.chains())
     print(chains)

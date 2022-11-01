@@ -23,7 +23,7 @@ from openmmforcefields.generators import SMIRNOFFTemplateGenerator
 from mace.calculators.openmm import MacePotentialImplFactory
 from openmmml import MLPotential
 
-from openmmtools.openmmtorch import repex, RepexConstructor
+from openmmtools.openmm_torch.repex import RepexConstructor, MixedSystemConstructor
 
 MLPotential.registerImplFactory("mace", MacePotentialImplFactory())
 torch.set_default_dtype(torch.float32)
@@ -42,7 +42,6 @@ def main():
     cplx = PDBFile(COMPLEX)
     modeller = Modeller(cplx.topology, cplx.positions)
     ligand_xyz = LIGAND.split(".")[0] + ".xyz"
-    atoms = read(ligand_xyz)
 
     forcefield = ForceField(
         "amber/protein.ff14SB.xml",
@@ -60,90 +59,27 @@ def main():
         nonbondedCutoff=1 * nanometer,
         constraints=HBonds,
     )
-    chains = list(modeller.topology.chains())
-    ml_atoms = [atom.index for atom in chains[3].atoms()]
-    print(f"selected {len(ml_atoms)} atoms for evaluation by the ML potential")
-    assert len(ml_atoms) == len(atoms)
-    potential = MLPotential("mace")
-    # set interpolate flag, defines lambda_interpolate to control the switching.  Call setParameter() on the context
-    system = potential.createMixedSystem(
-        modeller.topology, mm_system, ml_atoms, atoms_obj=atoms, interpolate=True
-    )
 
-    print("Preparing OpenMM Simulation...")
+    # We can replace this with the openmmtools constructur fr the nxed system, is just a little bit nicer
 
-    temperature = 298.15 * kelvin
-    frictionCoeff = 1 / picosecond
-    timeStep = 1 * femtosecond
-    # in the paper they do a 10 ps switching time, leaving at 1ps for testing
-    # n_step_neq = 1000
-
-    # TODO: maybe easier to manually step the integrator through nsteps_neq instead of creating the simulation environment
-    # alchemical_functions = {"lambda_interpolate": "lambda"}
-    integrator = LangevinMiddleIntegrator(
-        # alchemical_functions=alchemical_functions,
-        # nsteps_neq=n_step_neq,
-        temperature=temperature,
-        collision_rate=frictionCoeff,
-        timestep=timeStep,
-    )
-
-    simulation = Simulation(
-        modeller.topology,
-        system,
-        integrator,
-        platform=platform,
-        platformProperties={"Precision": "Single"},
-    )
-    simulation.context.setPositions(modeller.getPositions())
-    # state = simulation.context.getState(
-    #     getEnergy=True,
-    #     getVelocities=True,
-    #     getParameterDerivatives=True,
-    #     getForces=True,
-    #     getPositions=True,
-    # )
+    mixedSystem = MixedSystemConstructor(
+        system=mm_system,
+        topology=modeller.topology,
+        nnpify_resname="UNK",
+        nnp_potential="mace",
+    ).mixed_system
 
     sampler = RepexConstructor(
-        system,
-        modeller.getPositions(),
+        mixed_system=mixedSystem,
+        positions=modeller.getPositions(),
         repex_storage_file="./out_complex.nc",
         temperature=300 * kelvin,
         n_states=5,
     ).sampler
 
-    # sampler.minimize()
+    sampler.minimize()
 
-    # sampler.run()
-
-    # print("Minimising energy")
-    # simulation.minimizeEnergy()
-
-    # reporter = StateDataReporter(
-    #     file=sys.stdout,
-    #     reportInterval=1000,
-    #     step=True,
-    #     time=True,
-    #     potentialEnergy=True,
-    #     temperature=True,
-    #     speed=True,
-    #     totalSteps=n_step_neq,
-    #     remainingTime=True,
-    # )
-    # simulation.reporters.append(reporter)
-    # # Append the snapshots to the pdb file
-    # simulation.reporters.append(
-    #     PDBReporter("output_frames.pdb", n_step_neq / 80, enforcePeriodicBox=True)
-    # )
-    # # We need to take the final state
-    # simulation.step(n_step_neq)
-    # print(
-    #     "work done during switch from mm to ml",
-    #     integrator.get_protocol_work(dimensionless=True),
-    # )
-    # state = simulation.context.getState(getEnergy=True)
-    # energy_2 = state.getPotentialEnergy().value_in_unit(kilojoule_per_mole)
-    # print(energy_2)
+    sampler.run()
 
 
 if __name__ == "__main__":

@@ -75,7 +75,7 @@ def main():
     timeStep = 1 * femtosecond
     # in the paper they do a 10 ps switching time, leaving at 1ps for testing
     n_step_neq = 1000
-    
+
     # TODO: maybe easier to manually step the integrator through nsteps_neq instead of creating the simulation environment
     alchemical_functions = {"lambda_interpolate": "lambda"}
     integrator = AlchemicalNonequilibriumLangevinIntegrator(
