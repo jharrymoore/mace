@@ -5,12 +5,13 @@ import mace
 from mace.calculators.neighbour_list_torch import primitive_neighbor_list_torch
 from mace import data
 from mace.tools import torch_geometric, utils
-from typing import Optional, Iterable
+from typing import Optional, Iterable, List
 import openmm
 from openmmtorch import TorchForce
 from openmmml.mlpotential import MLPotential, MLPotentialImpl, MLPotentialImplFactory
 from ase import Atoms
 from openmm.app import Topology
+
 
 # torch.set_default_dtype(torch.float64)
 
@@ -24,7 +25,7 @@ def compile_model(model_path):
     return res
 
 
-class MACE_openmm(torch.nn.Module):
+class MACE_openmm_old(torch.nn.Module):
     def __init__(self, model_path, atoms_obj):
         super().__init__()
         dat = compile_model(model_path)
@@ -86,20 +87,16 @@ class MACE_openmm(torch.nn.Module):
         return (res["energy"], res["forces"])
 
 
-class MACE_openmm2(torch.nn.Module):
-    def __init__(
-        self,
-        model_path: str,
-        atom_indices: Optional[Iterable] = None,
-        atoms_obj: Optional[Atoms] = None,
-        topology: Optional[Topology] = None,
-    ):
+class MACE_openmm(torch.nn.Module):
+    def __init__(self, model_path: str, atoms_obj: List, nl="torch_nl", device="cuda"):
         super().__init__()
-        assert atoms_obj is not None or topology is not None
-
-        self.device = torch.device("cuda")
-        self.atom_indices = atom_indices
-
+        if nl == "torch_nl":
+            self.nl = compute_neighborlist
+        elif nl == "torch_nl_n2":
+            self.nl = compute_neighborlist_n2
+        else:
+            raise NotImplementedError
+        self.device = torch.device(device)
         dat = compile_model(model_path)
         # TODO: if only the topology was passed, create the config from this
         config = data.config_from_atoms(atoms_obj)
@@ -134,13 +131,12 @@ class MACE_openmm2(torch.nn.Module):
         boxVectors = boxVectors * 10
         boxVectors = boxVectors.type(torch.float32).to(self.device)
         bbatch = torch.zeros(positions.shape[0], dtype=torch.long, device=self.device)
-        mapping, batch_mapping, shifts_idx = compute_neighborlist(
+        mapping, batch_mapping, shifts_idx = self.nl(
             cutoff=self.r_max,
             pos=positions.to(self.device),
             cell=boxVectors,
             pbc=torch.tensor([True, True, True], device=self.device),
             batch=bbatch,
-            self_interaction=True,
         )
 
         # Eliminate self-edges that don't cross periodic boundaries
@@ -198,7 +194,7 @@ class MacePotentialImpl(MLPotentialImpl):
         print("MACE model compiled")
         # TODO: this should take a topology
         # A bit hacky to add the atoms object like this
-        openmm_calc = MACE_openmm2(filename, atom_indices=atoms, **args)
+        openmm_calc = MACE_openmm(filename, atom_indices=atoms, **args)
         jit.script(openmm_calc).save("md_test_mace.pt")
         force = TorchForce("md_test_mace.pt")
         # force.setOutputsForces(True)

@@ -1,5 +1,5 @@
 Lattice="50.0 0.0 0.0 0.0 50.0 0.0 0.0 0.0 50.0" Properties=species:S:1:pos:R:3:forces:R:3 energy=-2298.8851580574014 config_type=QMugs_MD pbc="F F F"
- OpenBabel10242215293D
+ OpenBabel10252219593D
 
  52 54  0  0  0  0  0  0  0  0999 V2000
    -4.6570    3.7303   -1.8818 C   0  0  0  0  0  0  0  0  0  0  0  0

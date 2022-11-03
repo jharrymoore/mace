@@ -28,3 +28,4 @@ build/
 *.log
 *.model
 *.sh
+*.nc
