@@ -88,7 +88,15 @@ class MACE_openmm_old(torch.nn.Module):
 
 
 class MACE_openmm(torch.nn.Module):
-    def __init__(self, model_path: str, atoms_obj: List, nl="torch_nl", device="cuda"):
+    def __init__(
+        self,
+        model_path: str,
+        atom_indices: Optional[Iterable] = None,
+        nl: str = "torch_nl_n2",
+        atoms_obj: Optional[Atoms] = None,
+        topology: Optional[Topology] = None,
+        device: str = "cuda",
+    ):
         super().__init__()
         if nl == "torch_nl":
             self.nl = compute_neighborlist
@@ -97,6 +105,7 @@ class MACE_openmm(torch.nn.Module):
         else:
             raise NotImplementedError
         self.device = torch.device(device)
+        self.atom_indices = atom_indices
         dat = compile_model(model_path)
         # TODO: if only the topology was passed, create the config from this
         config = data.config_from_atoms(atoms_obj)
@@ -162,6 +171,7 @@ class MACE_openmm(torch.nn.Module):
         # inp_dict_this_config[""] =
         res = self.model(inp_dict_this_config)
         # return (res["energy"], res["forces"])
+        # return res["scaled_interaction_energy"]
         return res["energy"]
 
 
@@ -185,7 +195,8 @@ class MacePotentialImpl(MLPotentialImpl):
         system: openmm.System,
         atoms: Optional[Iterable[int]],
         forceGroup: int,
-        filename: str = "tests/test_openmm/MACE_SPICE.model",
+        # FIXME: this should not be a hardcoded filepath
+        filename: str = "/home/jhm72/rds/hpc-work/mace-openmm/tests/test_openmm/MACE_SPICE.model",
         implementation: str = "nnpops",
         **args,
     ):

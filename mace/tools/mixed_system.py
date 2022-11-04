@@ -1,6 +1,7 @@
 import sys
 from ase.io import read
 import torch
+import time
 from argparse import ArgumentParser
 import numpy as np
 import sys
@@ -34,15 +35,7 @@ from openmmtools.openmm_torch.repex import (
 )
 from tempfile import mkstemp
 import os
-
-
-# COMPLEX = "tests/test_openmm/tnks_complex.pdb"
-# LIGAND = "tests/test_openmm/5n.sdf"
-# # platform = Platform.getPlatformByName("CUDA")
-# # platform.setPropertyDefaultValue("DeterministicForces", "true")
-# RESNAME = "UNK"
-
-# standalone proof of concept script for running a neq switch from the MM description of the system to the MM/ML mixed system
+import logging
 
 
 def get_xyz_from_mol(mol):
@@ -55,10 +48,10 @@ def get_xyz_from_mol(mol):
         xyz[i, 1] = position.y
         xyz[i, 2] = position.z
     return xyz
-
-
 MLPotential.registerImplFactory("mace", MacePotentialImplFactory())
 torch.set_default_dtype(torch.float32)
+
+logger = logging.getLogger("INFO")
 
 
 class MixedSystem:
@@ -95,7 +88,7 @@ class MixedSystem:
     def initialize_mm_forcefield(self, molecule: Optional[Molecule] = None):
         forcefield = ForceField(*self.forcefields)
         if molecule is not None:
-            print("registering smirnoff template generator")
+            logging.info("registering smirnoff template generator")
             smirnoff = SMIRNOFFTemplateGenerator(molecules=molecule)
             forcefield.registerTemplateGenerator(smirnoff.generator)
         return forcefield
@@ -130,14 +123,14 @@ class MixedSystem:
             )
         forcefield = self.initialize_mm_forcefield(molecule)
         modeller.addSolvent(
-            forcefield, padding=self.padding, ionicStrength=self.ionicStrength * molar
+            forcefield, padding=self.padding * nanometers, ionicStrength=self.ionicStrength * molar, neutralize=True 
         )
 
         mm_system = forcefield.createSystem(
             modeller.topology,
             nonbondedMethod=PME,
             nonbondedCutoff=self.nonbondedCutoff * nanometer,
-            constraints=HBonds,
+            # constraints=HBonds,
             rigidWater=True,
             removeCMMotion=False
 
@@ -154,7 +147,13 @@ class MixedSystem:
 
         return mixed_system, modeller
 
-    def run_mixed_md(self, steps: int, interval: int):
+
+    def create_pure_ml_system(self, file: str, model_path: str) -> System:
+        """Calls the createSystem from the ml potential directly, instead of the mixed system.  Useful for materials systems etc where openMM cannot generate parameters in the first place
+        """
+
+
+    def run_mixed_md(self, steps: int, interval: int, output_file: str) -> float:
         """Runs plain MD on the mixed system, writes a pdb trajectory
 
         :param int steps: number of steps to run the simulation for
@@ -171,15 +170,8 @@ class MixedSystem:
             platformProperties={"Precision": "Mixed"},
         )
         simulation.context.setPositions(self.modeller.getPositions())
-        state = simulation.context.getState(
-            getEnergy=True,
-            getVelocities=True,
-            getParameterDerivatives=True,
-            getForces=True,
-            getPositions=True,
-        )
 
-        print("Minimising energy")
+        logging.log("Minimising energy")
         simulation.minimizeEnergy()
 
         reporter = StateDataReporter(
@@ -194,16 +186,15 @@ class MixedSystem:
         simulation.reporters.append(reporter)
         simulation.reporters.append(
             PDBReporter(
-                file="output_complex.pdb",
+                file=output_file,
                 reportInterval=interval,
-                enforcePeriodicBox=True,
             )
         )
 
         simulation.step(steps)
         state = simulation.context.getState(getEnergy=True)
         energy_2 = state.getPotentialEnergy().value_in_unit(kilojoule_per_mole)
-        print(energy_2)
+        return energy_2
 
     def run_replex_equilibrium_fep(self, replicas: int) -> None:
 
@@ -221,10 +212,11 @@ class MixedSystem:
                 ),
             },
         ).sampler
-
+        logging.info("Minimizing system...")
+        t1 = time.time()
         sampler.minimize()
 
-        print("Minimised system")
+        logging.info(f"Minimised system  in {time.time() - t1} seconds")
 
         sampler.run()
 
@@ -252,7 +244,7 @@ class MixedSystem:
         )
         simulation.context.setPositions(self.modeller.getPositions())
 
-        print("Minimising energy")
+        logging.info("Minimising energy")
         simulation.minimizeEnergy()
 
         reporter = StateDataReporter(
@@ -273,7 +265,5 @@ class MixedSystem:
         )
         # We need to take the final state
         simulation.step(steps)
-        print(
-            "work done during switch from mm to ml",
-            integrator.get_protocol_work(dimensionless=True),
-        )
+        protocol_work = integrator.get_protocol_work(dimensionless=True),
+        return protocol_work

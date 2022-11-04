@@ -1,8 +1,9 @@
 from argparse import ArgumentParser
 from mace.tools.mixed_system import MixedSystem
+from mace import tools
+import logging
 
-
-if __name__ == "__main__":
+def main():
     parser = ArgumentParser()
 
     parser.add_argument("--file", "-f", type=str)
@@ -15,6 +16,9 @@ if __name__ == "__main__":
     parser.add_argument("--potential", default="mace", type=str)
     parser.add_argument("--temperature", type=float, default=298.15)
     parser.add_argument("--replicas", type=int, default=10)
+    parser.add_argument("--output_file", "-o", type=str, default="output.pdb", help="output file for the pdb reporter")
+    parser.add_argument("--log_level", default=logging.INFO, type=int)
+    parser.add_argument("--log_dir", default="./logs")
     parser.add_argument(
         "--forcefields",
         type=list,
@@ -38,6 +42,10 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+
+
+    tools.setup_logger(level=args.log_level, directory=args.log_dir)
+
     mixed_system = MixedSystem(
         file=args.file,
         smiles=args.smiles,
@@ -51,10 +59,14 @@ if __name__ == "__main__":
         temperature=args.temperature,
     )
     if args.run_type == "md":
-        mixed_system.run_mixed_md(args.steps, args.interval)
+        mixed_system.run_mixed_md(args.steps, args.interval, args.output_file)
     elif args.run_type == "repex":
         mixed_system.run_replex_equilibrium_fep(args.replicas)
     elif args.run_type == "neq":
         mixed_system.run_neq_switching(args.steps, args.interval)
     else:
         raise ValueError(f"run_type {args.run_type} was not recognised")
+
+
+if __name__ == "__main__":
+    main()
