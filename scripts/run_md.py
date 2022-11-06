@@ -2,6 +2,7 @@ from argparse import ArgumentParser
 from mace.tools.mixed_system import MixedSystem
 from mace import tools
 import logging
+import os
 
 def main():
     parser = ArgumentParser()
@@ -19,6 +20,8 @@ def main():
     parser.add_argument("--output_file", "-o", type=str, default="output.pdb", help="output file for the pdb reporter")
     parser.add_argument("--log_level", default=logging.INFO, type=int)
     parser.add_argument("--log_dir", default="./logs")
+    parser.add_argument("--storage_path", help="path to the nc file used by the multistate reporters", default=os.path.join(os.getcwd(), "repex.nc"))
+    parser.add_argument("--restart", action="store_true")
     parser.add_argument(
         "--forcefields",
         type=list,
@@ -57,11 +60,12 @@ def main():
         potential=args.potential,
         padding=args.padding,
         temperature=args.temperature,
+        repex_storage_path=args.storage_path
     )
     if args.run_type == "md":
         mixed_system.run_mixed_md(args.steps, args.interval, args.output_file)
     elif args.run_type == "repex":
-        mixed_system.run_replex_equilibrium_fep(args.replicas)
+        mixed_system.run_replex_equilibrium_fep(args.replicas, args.restart)
     elif args.run_type == "neq":
         mixed_system.run_neq_switching(args.steps, args.interval)
     else:

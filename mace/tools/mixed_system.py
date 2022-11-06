@@ -6,6 +6,7 @@ from argparse import ArgumentParser
 import numpy as np
 import sys
 from rdkit import Chem
+from ase import Atoms
 from openmm.openmm import System
 from openmm import Platform, LangevinMiddleIntegrator
 from openmmtools.integrators import AlchemicalNonequilibriumLangevinIntegrator
@@ -21,7 +22,7 @@ from openmm.app import (
     PME,
 )
 from typing import List, Optional, Tuple
-from openmm.unit import nanometer, nanometers, molar
+from openmm.unit import nanometer, nanometers, molar, angstrom
 from openmm.unit import kelvin, picosecond, femtosecond, kilojoule_per_mole
 from openff.toolkit.topology import Molecule
 from openmmforcefields.generators import SMIRNOFFTemplateGenerator
@@ -67,6 +68,7 @@ class MixedSystem:
         nonbondedCutoff: float,
         potential: str,
         temperature: float,
+        repex_storage_path: str,
         friction_coeff: float = 1.0,
         timestep: float = 1,
     ) -> None:
@@ -80,6 +82,7 @@ class MixedSystem:
         self.temperature = temperature
         self.friction_coeff = friction_coeff / picosecond
         self.timestep = timestep * femtosecond
+        self.repex_storage_path = repex_storage_path
 
         self.mixed_system, self.modeller = self.create_mixed_system(
             file=file, smiles= smiles, model_path=model_path
@@ -94,6 +97,14 @@ class MixedSystem:
         return forcefield
 
 
+    def initialize_ase_atoms_from_smiles(self, smiles: str) -> Tuple[ Atoms, Molecule]:
+        molecule = Molecule.from_smiles(smiles)
+        _, tmpfile = mkstemp(suffix="xyz")
+        molecule._to_xyz_file(tmpfile)
+        atoms = read(tmpfile)
+        os.remove(tmpfile)
+        return atoms, molecule
+
     def create_mixed_system(
         self, file: str, model_path: str, smiles: str = None, 
     ) -> Tuple[System, Modeller]:
@@ -104,37 +115,52 @@ class MixedSystem:
         :param str model_path: path to the mace model
         :return Tuple[System, Modeller]: return mixed system and the modeller for topology + position access by downstream methods
         """
-        
-        molecule = Molecule.from_smiles(smiles)
-        _, tmpfile = mkstemp(suffix="xyz")
-        molecule._to_xyz_file(tmpfile)
-        atoms = read(tmpfile)
-        os.remove(tmpfile)
+        # initialize the ase atoms for MACE 
+        atoms, molecule = self.initialize_ase_atoms_from_smiles(smiles)
+
         # Handle a complex, passed as a pdb file
         if file.endswith(".pdb"):
             input_file = PDBFile(file)
             modeller = Modeller(input_file.topology, input_file.positions)
-        # Handle a ligand, passed as an sdf
+
+        # Handle a ligand, passed as an sdf, override the Molecule initialized from smiles
         elif file.endswith(".sdf"):
-            input_file = Molecule.from_file(file)
+            molecule = Molecule.from_file(file)
+            # Hold positions in nanometers
+            positions = get_xyz_from_mol(molecule.to_rdkit()) / 10
+
             modeller = Modeller(
-                input_file.to_topology().to_openmm(),
-                get_xyz_from_mol(input_file.to_rdkit()),
+                molecule.to_topology().to_openmm(),
+                positions
             )
+            
         forcefield = self.initialize_mm_forcefield(molecule)
         modeller.addSolvent(
             forcefield, padding=self.padding * nanometers, ionicStrength=self.ionicStrength * molar, neutralize=True 
         )
 
+        omm_box_vecs = modeller.topology.getPeriodicBoxVectors()
+        logger.debug("Box size", omm_box_vecs[0][0].value_in_unit(angstrom))
+
+        atoms.set_cell(
+            [
+                omm_box_vecs[0][0].value_in_unit(angstrom),
+                omm_box_vecs[1][1].value_in_unit(angstrom),
+                omm_box_vecs[2][2].value_in_unit(angstrom),
+            ]
+        )
+        
+
         mm_system = forcefield.createSystem(
             modeller.topology,
             nonbondedMethod=PME,
             nonbondedCutoff=self.nonbondedCutoff * nanometer,
-            # constraints=HBonds,
+            constraints=HBonds,
             rigidWater=True,
             removeCMMotion=False
 
         )
+
 
         mixed_system = MixedSystemConstructor(
             system=mm_system,
@@ -151,6 +177,7 @@ class MixedSystem:
     def create_pure_ml_system(self, file: str, model_path: str) -> System:
         """Calls the createSystem from the ml potential directly, instead of the mixed system.  Useful for materials systems etc where openMM cannot generate parameters in the first place
         """
+        raise NotImplementedError
 
 
     def run_mixed_md(self, steps: int, interval: int, output_file: str) -> float:
@@ -171,7 +198,7 @@ class MixedSystem:
         )
         simulation.context.setPositions(self.modeller.getPositions())
 
-        logging.log("Minimising energy")
+        logging.info("Minimising energy")
         simulation.minimizeEnergy()
 
         reporter = StateDataReporter(
@@ -196,27 +223,29 @@ class MixedSystem:
         energy_2 = state.getPotentialEnergy().value_in_unit(kilojoule_per_mole)
         return energy_2
 
-    def run_replex_equilibrium_fep(self, replicas: int) -> None:
-
+    def run_replex_equilibrium_fep(self, replicas: int, restart: bool) -> None:
+        
         sampler = RepexConstructor(
             mixed_system=self.mixed_system,
             initial_positions=self.modeller.getPositions(),
-            repex_storage_file="./out_complex.nc",
+            # repex_storage_file="./out_complex.nc",
             temperature=self.temperature * kelvin,
             n_states=replicas,
+            restart = restart,
             storage_kwargs={
-                "storage": "/home/jhm72/rds/hpc-work/mace-openmm/repex.nc",
+                "storage": self.repex_storage_path,
                 "checkpoint_interval": 100,
                 "analysis_particle_indices": get_atoms_from_resname(
                     topology=self.modeller.topology, resname=self.resname
                 ),
             },
         ).sampler
-        logging.info("Minimizing system...")
-        t1 = time.time()
-        sampler.minimize()
+        if not restart:
+            logging.info("Minimizing system...")
+            t1 = time.time()
+            sampler.minimize()
 
-        logging.info(f"Minimised system  in {time.time() - t1} seconds")
+            logging.info(f"Minimised system  in {time.time() - t1} seconds")
 
         sampler.run()
 

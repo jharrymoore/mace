@@ -171,8 +171,8 @@ class MACE_openmm(torch.nn.Module):
         # inp_dict_this_config[""] =
         res = self.model(inp_dict_this_config)
         # return (res["energy"], res["forces"])
-        # return res["scaled_interaction_energy"]
-        return res["energy"]
+        return res["scaled_interaction_energy"]
+        # return res["energy"]
 
 
 class MacePotentialImplFactory(MLPotentialImplFactory):
