@@ -138,7 +138,7 @@ class MACE_openmm(torch.nn.Module):
         )
         positions = positions * 10
         boxVectors = boxVectors * 10
-        boxVectors = boxVectors.type(torch.float32).to(self.device)
+        boxVectors = boxVectors.type(torch.float64).to(self.device)
         bbatch = torch.zeros(positions.shape[0], dtype=torch.long, device=self.device)
         mapping, batch_mapping, shifts_idx = self.nl(
             cutoff=self.r_max,

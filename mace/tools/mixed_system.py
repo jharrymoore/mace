@@ -8,6 +8,7 @@ import sys
 from rdkit import Chem
 from ase import Atoms
 from openmm.openmm import System
+from openmm import unit
 from openmm import Platform, LangevinMiddleIntegrator
 from openmmtools.integrators import AlchemicalNonequilibriumLangevinIntegrator
 from openmm.app import (
@@ -49,8 +50,12 @@ def get_xyz_from_mol(mol):
         xyz[i, 1] = position.y
         xyz[i, 2] = position.z
     return xyz
+
+
 MLPotential.registerImplFactory("mace", MacePotentialImplFactory())
-torch.set_default_dtype(torch.float32)
+torch.set_default_dtype(torch.float64)
+# platform = Platform.getPlatformByName("CUDA")
+# platform.setPropertyDefaultValue("DeterministicForces", "true")
 
 logger = logging.getLogger("INFO")
 
@@ -85,7 +90,7 @@ class MixedSystem:
         self.repex_storage_path = repex_storage_path
 
         self.mixed_system, self.modeller = self.create_mixed_system(
-            file=file, smiles= smiles, model_path=model_path
+            file=file, smiles=smiles, model_path=model_path
         )
 
     def initialize_mm_forcefield(self, molecule: Optional[Molecule] = None):
@@ -96,8 +101,7 @@ class MixedSystem:
             forcefield.registerTemplateGenerator(smirnoff.generator)
         return forcefield
 
-
-    def initialize_ase_atoms_from_smiles(self, smiles: str) -> Tuple[ Atoms, Molecule]:
+    def initialize_ase_atoms_from_smiles(self, smiles: str) -> Tuple[Atoms, Molecule]:
         molecule = Molecule.from_smiles(smiles)
         _, tmpfile = mkstemp(suffix="xyz")
         molecule._to_xyz_file(tmpfile)
@@ -106,7 +110,11 @@ class MixedSystem:
         return atoms, molecule
 
     def create_mixed_system(
-        self, file: str, model_path: str, smiles: str = None, 
+        self,
+        file: str,
+        model_path: str,
+        smiles: str = None,
+        pure_ml_system: bool = False,
     ) -> Tuple[System, Modeller]:
         """Creates the mixed system from a purely mm system
 
@@ -115,70 +123,82 @@ class MixedSystem:
         :param str model_path: path to the mace model
         :return Tuple[System, Modeller]: return mixed system and the modeller for topology + position access by downstream methods
         """
-        # initialize the ase atoms for MACE 
+        # initialize the ase atoms for MACE
         atoms, molecule = self.initialize_ase_atoms_from_smiles(smiles)
 
         # Handle a complex, passed as a pdb file
         if file.endswith(".pdb"):
+            turn_off_constraints = False
             input_file = PDBFile(file)
-            modeller = Modeller(input_file.topology, input_file.positions)
+
+            # if pure_ml_system specified, we just need to parse the input file
+            if not pure_ml_system:
+                modeller = Modeller(input_file.topology, input_file.positions)
 
         # Handle a ligand, passed as an sdf, override the Molecule initialized from smiles
         elif file.endswith(".sdf"):
+            turn_off_constraints = True
             molecule = Molecule.from_file(file)
             # Hold positions in nanometers
             positions = get_xyz_from_mol(molecule.to_rdkit()) / 10
 
-            modeller = Modeller(
-                molecule.to_topology().to_openmm(),
-                positions
+            modeller = Modeller(molecule.to_topology().to_openmm(), positions)
+        if pure_ml_system:
+            # we have the input_file, create the system directly from the mace potential
+            modeller = None
+            ml_potential = MLPotential("mace")
+            ml_system = ml_potential.createSystem(
+                input_file.getTopology(), atoms_obj=atoms, filename=model_path
             )
-            
-        forcefield = self.initialize_mm_forcefield(molecule)
-        modeller.addSolvent(
-            forcefield, padding=self.padding * nanometers, ionicStrength=self.ionicStrength * molar, neutralize=True 
-        )
+            return ml_system, modeller
 
-        omm_box_vecs = modeller.topology.getPeriodicBoxVectors()
-        logger.debug("Box size", omm_box_vecs[0][0].value_in_unit(angstrom))
+        else:
+            forcefield = self.initialize_mm_forcefield(molecule)
+            modeller.addSolvent(
+                forcefield,
+                padding=self.padding * nanometers,
+                ionicStrength=self.ionicStrength * molar,
+                neutralize=True,
+            )
 
-        atoms.set_cell(
-            [
-                omm_box_vecs[0][0].value_in_unit(angstrom),
-                omm_box_vecs[1][1].value_in_unit(angstrom),
-                omm_box_vecs[2][2].value_in_unit(angstrom),
-            ]
-        )
-        
+            omm_box_vecs = modeller.topology.getPeriodicBoxVectors()
 
-        mm_system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=PME,
-            nonbondedCutoff=self.nonbondedCutoff * nanometer,
-            constraints=HBonds,
-            rigidWater=True,
-            removeCMMotion=False
+            atoms.set_cell(
+                [
+                    omm_box_vecs[0][0].value_in_unit(angstrom),
+                    omm_box_vecs[1][1].value_in_unit(angstrom),
+                    omm_box_vecs[2][2].value_in_unit(angstrom),
+                ]
+            )
 
-        )
+            mm_system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=PME,
+                nonbondedCutoff=self.nonbondedCutoff * nanometer,
+                # TODO: why are the constarints causing us issues
+                # Empirically it looks like we avoid integrator issues with the MCMC if we have constraints on for the ligand, and off for the protein
+                constraints=HBonds if not turn_off_constraints else None,
+                # constraints=HBonds,
+                # rigidWater=True,
+            )
 
-
-        mixed_system = MixedSystemConstructor(
-            system=mm_system,
-            topology=modeller.topology,
-            nnpify_resname=self.resname,
-            nnp_potential=self.potential,
-            atoms_obj=atoms,
-            filename=model_path,
-        ).mixed_system
+            mixed_system = MixedSystemConstructor(
+                system=mm_system,
+                topology=modeller.topology,
+                nnpify_resname=self.resname,
+                nnp_potential=self.potential,
+                atoms_obj=atoms,
+                filename=model_path,
+            ).mixed_system
 
         return mixed_system, modeller
 
+    # def create_pure_ml_system(self, file: str, model_path: str) -> System:
+    #     """Calls the createSystem from the ml potential directly, instead of the mixed system.  Useful for materials systems etc where openMM cannot generate parameters in the first place
+    #     """
 
-    def create_pure_ml_system(self, file: str, model_path: str) -> System:
-        """Calls the createSystem from the ml potential directly, instead of the mixed system.  Useful for materials systems etc where openMM cannot generate parameters in the first place
-        """
-        raise NotImplementedError
-
+    #     input_file = PDBFile(file)
+    #     self.
 
     def run_mixed_md(self, steps: int, interval: int, output_file: str) -> float:
         """Runs plain MD on the mixed system, writes a pdb trajectory
@@ -224,14 +244,14 @@ class MixedSystem:
         return energy_2
 
     def run_replex_equilibrium_fep(self, replicas: int, restart: bool) -> None:
-        
+
         sampler = RepexConstructor(
             mixed_system=self.mixed_system,
             initial_positions=self.modeller.getPositions(),
             # repex_storage_file="./out_complex.nc",
             temperature=self.temperature * kelvin,
             n_states=replicas,
-            restart = restart,
+            restart=restart,
             storage_kwargs={
                 "storage": self.repex_storage_path,
                 "checkpoint_interval": 100,
@@ -294,5 +314,5 @@ class MixedSystem:
         )
         # We need to take the final state
         simulation.step(steps)
-        protocol_work = integrator.get_protocol_work(dimensionless=True),
+        protocol_work = (integrator.get_protocol_work(dimensionless=True),)
         return protocol_work

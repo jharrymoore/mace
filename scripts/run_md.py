@@ -4,12 +4,17 @@ from mace import tools
 import logging
 import os
 
+
 def main():
     parser = ArgumentParser()
 
     parser.add_argument("--file", "-f", type=str)
-    parser.add_argument("--smiles", type=str, help="smiles for the small molecule", default=None)
-    parser.add_argument("--run_type", choices=["md", "repex", "neq"], type=str, default="md")
+    parser.add_argument(
+        "--smiles", type=str, help="smiles for the small molecule", default=None
+    )
+    parser.add_argument(
+        "--run_type", choices=["md", "repex", "neq"], type=str, default="md"
+    )
     parser.add_argument("--steps", "-s", type=int, default=10000)
     parser.add_argument("--padding", "-p", default=1.2, type=float)
     parser.add_argument("--nonbondedCutoff", "-c", default=1.0, type=float)
@@ -17,10 +22,20 @@ def main():
     parser.add_argument("--potential", default="mace", type=str)
     parser.add_argument("--temperature", type=float, default=298.15)
     parser.add_argument("--replicas", type=int, default=10)
-    parser.add_argument("--output_file", "-o", type=str, default="output.pdb", help="output file for the pdb reporter")
+    parser.add_argument(
+        "--output_file",
+        "-o",
+        type=str,
+        default="output.pdb",
+        help="output file for the pdb reporter",
+    )
     parser.add_argument("--log_level", default=logging.INFO, type=int)
     parser.add_argument("--log_dir", default="./logs")
-    parser.add_argument("--storage_path", help="path to the nc file used by the multistate reporters", default=os.path.join(os.getcwd(), "repex.nc"))
+    parser.add_argument(
+        "--storage_path",
+        help="path to the nc file used by the multistate reporters",
+        default=os.path.join(os.getcwd(), "repex.nc"),
+    )
     parser.add_argument("--restart", action="store_true")
     parser.add_argument(
         "--forcefields",
@@ -45,8 +60,6 @@ def main():
     )
     args = parser.parse_args()
 
-
-
     tools.setup_logger(level=args.log_level, directory=args.log_dir)
 
     mixed_system = MixedSystem(
@@ -60,7 +73,7 @@ def main():
         potential=args.potential,
         padding=args.padding,
         temperature=args.temperature,
-        repex_storage_path=args.storage_path
+        repex_storage_path=args.storage_path,
     )
     if args.run_type == "md":
         mixed_system.run_mixed_md(args.steps, args.interval, args.output_file)
