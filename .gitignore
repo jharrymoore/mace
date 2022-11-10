@@ -16,16 +16,15 @@ build/
 # IDE
 .idea/
 .vscode/
+nan-error-logs/
 
 
-*.pdb
-*.xyz
-*.sdf
 *.out
-*.sh
 *.pt
 *.txt
 *.log
 *.model
-*.sh
+
 *.nc
+*.yaml
+

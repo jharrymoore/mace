@@ -85,7 +85,9 @@ def main():
             compute_stress=False,
         )
         batch.to("cpu")
-        output = tools.torch_tools.tensor_dict_to_device(output, device=torch.device("cpu"))
+        output = tools.torch_tools.tensor_dict_to_device(
+            output, device=torch.device("cpu")
+        )
         energies_list.append(tools.to_numpy(output["energy"]))
 
         if not args.no_contributions:

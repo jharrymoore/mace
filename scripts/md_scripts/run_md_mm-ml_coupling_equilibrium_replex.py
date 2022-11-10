@@ -23,15 +23,20 @@ from openmmforcefields.generators import SMIRNOFFTemplateGenerator
 from mace.calculators.openmm import MacePotentialImplFactory
 from openmmml import MLPotential
 
-from openmmtools.openmm_torch.repex import RepexConstructor, MixedSystemConstructor
+from openmmtools.openmm_torch.repex import (
+    MixedSystemConstructor,
+    RepexConstructor,
+    get_atoms_from_resname,
+)
 
 MLPotential.registerImplFactory("mace", MacePotentialImplFactory())
 torch.set_default_dtype(torch.float32)
 
 COMPLEX = "tests/test_openmm/tnks_complex.pdb"
 LIGAND = "tests/test_openmm/5n.sdf"
-platform = Platform.getPlatformByName("CUDA")
-platform.setPropertyDefaultValue("DeterministicForces", "true")
+# platform = Platform.getPlatformByName("CUDA")
+# platform.setPropertyDefaultValue("DeterministicForces", "true")
+RESNAME = "UNK"
 
 # standalone proof of concept script for running a neq switch from the MM description of the system to the MM/ML mixed system
 
@@ -42,6 +47,7 @@ def main():
     cplx = PDBFile(COMPLEX)
     modeller = Modeller(cplx.topology, cplx.positions)
     ligand_xyz = LIGAND.split(".")[0] + ".xyz"
+    atoms = read(ligand_xyz)
 
     forcefield = ForceField(
         "amber/protein.ff14SB.xml",
@@ -57,30 +63,40 @@ def main():
         modeller.topology,
         nonbondedMethod=PME,
         nonbondedCutoff=1 * nanometer,
-        constraints=HBonds,
+        # constraints=HBonds,
     )
-
-    # We can replace this with the openmmtools constructur fr the nxed system, is just a little bit nicer
 
     mixedSystem = MixedSystemConstructor(
         system=mm_system,
         topology=modeller.topology,
-        nnpify_resname="UNK",
+        nnpify_resname=RESNAME,
         nnp_potential="mace",
+        atoms_obj=atoms,
     ).mixed_system
+
+    print(mixedSystem)
 
     sampler = RepexConstructor(
         mixed_system=mixedSystem,
-        positions=modeller.getPositions(),
+        initial_positions=modeller.getPositions(),
         repex_storage_file="./out_complex.nc",
         temperature=300 * kelvin,
-        n_states=5,
+        n_states=3,
+        storage_kwargs={
+            "storage": "/home/jhm72/rds/hpc-work/mace-openmm/repex.nc",
+            "checkpoint_interval": 100,
+            "analysis_particle_indices": get_atoms_from_resname(
+                modeller.topology, RESNAME
+            ),
+        },
     ).sampler
 
     sampler.minimize()
+
+    print("Minimised system")
 
     sampler.run()
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+    main()

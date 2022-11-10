@@ -72,7 +72,7 @@ def main():
         nonbondedCutoff=1 * nanometer,
         constraints=HBonds,
         rigidWater=True,
-        hydrogenMass=4*amu
+        hydrogenMass=4 * amu,
     )
     chains = list(modeller.topology.chains())
     print(chains)
