@@ -34,7 +34,7 @@ def compute_forces(
     ]  # [n_nodes, 3]
     if gradient is None:
         return torch.zeros_like(positions)
-    return -1 * gradient * 964.86
+    return -1 * gradient 
 
 
 def compute_forces_virials(
@@ -64,11 +64,11 @@ def compute_forces_virials(
         ).unsqueeze(-1)
         stress = virials / volume.view(-1, 1, 1)
     if forces is not None and virials is None:
-        return -1 * forces * 964.86, torch.zeros_like(positions).expand(1, 1, 3), None
+        return -1 * forces, torch.zeros_like(positions).expand(1, 1, 3), None
     if forces is None and virials is not None:
         return torch.zeros_like(positions), -1 * virials, None
     if forces is not None and virials is not None:
-        return -1 * forces * 964.86, -1 * virials, stress
+        return -1 * forces, -1 * virials, stress
     return (
         torch.zeros_like(positions),
         torch.zeros_like(positions).expand(1, 1, 3),
