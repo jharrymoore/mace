@@ -51,12 +51,10 @@ class MACE(torch.nn.Module):
         atomic_numbers: List[int],
         correlation: int,
         gate: Optional[Callable],
-        openmm_units: bool = False,
     ):
         super().__init__()
         self.r_max = r_max
         self.atomic_numbers = atomic_numbers
-        self.openmm_units = openmm_units
         # Embedding
         node_attr_irreps = o3.Irreps([(num_elements, (0, 1))])
         node_feats_irreps = o3.Irreps([(hidden_irreps.count(o3.Irrep(0, 1)), (0, 1))])
@@ -326,8 +324,7 @@ class ScaleShiftMACE(MACE):
         )  # [n_graphs,]
 
         # Add E_0 and (scaled) interaction energy
-        total_energy = (e0 + inter_e) * 96.486
-        # if self.openmm_units
+        total_energy = e0 + inter_e 
         # convert from eV to kJ/mol for OpenMM
         scaled_interaction_energy = inter_e * 96.486
 
