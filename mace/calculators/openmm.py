@@ -1,4 +1,5 @@
 from e3nn.util import jit
+import time
 import torch
 from torch_nl import compute_neighborlist, compute_neighborlist_n2
 import mace
@@ -12,6 +13,7 @@ from openmmml.mlpotential import MLPotential, MLPotentialImpl, MLPotentialImplFa
 from ase import Atoms
 from openmm.app import Topology
 
+from ase.units import kJ, mol
 
 def compile_model(model_path):
     model = torch.load(model_path)
@@ -21,67 +23,8 @@ def compile_model(model_path):
     res["r_max"] = model.r_max
     return res
 
+  
 
-class MACE_openmm_old(torch.nn.Module):
-    def __init__(self, model_path, atoms_obj):
-        super().__init__()
-        dat = compile_model(model_path)
-        config = data.config_from_atoms(atoms_obj)
-        data_loader = torch_geometric.dataloader.DataLoader(
-            dataset=[
-                data.AtomicData.from_config(
-                    config, z_table=dat["z_table"], cutoff=dat["r_max"]
-                )
-            ],
-            batch_size=1,
-            shuffle=False,
-            drop_last=False,
-        )
-        batch_dict = next(iter(data_loader)).to_dict()
-        batch_dict.pop("edge_index")
-        batch_dict.pop("energy", None)
-        batch_dict.pop("forces", None)
-        batch_dict.pop("positions")
-        # batch_dict.pop("shifts")
-        batch_dict.pop("weight")
-        self.inp_dict = batch_dict
-        self.model = dat["model"]
-        self.r_max = dat["r_max"]
-
-    def forward(self, positions):
-        sender, receiver, unit_shifts = primitive_neighbor_list_torch(
-            quantities="ijS",
-            pbc=(True, True, True),
-            cell=self.inp_dict["cell"],
-            positions=positions,
-            cutoff=self.r_max,
-            self_interaction=True,  # we want edges from atom to itself in different periodic images
-            use_scaled_positions=False,  # positions are not scaled positions
-            device="cpu",
-        )
-        # openMM passes positions in nanometers
-        # Eliminate self-edges that don't cross periodic boundaries
-        true_self_edge = sender == receiver
-        true_self_edge &= torch.all(unit_shifts == 0, dim=1)
-        keep_edge = ~true_self_edge
-
-        # Note: after eliminating self-edges, it can be that no edges remain in this system
-        sender = sender[keep_edge]
-        receiver = receiver[keep_edge]
-        unit_shifts = unit_shifts[keep_edge]
-        # Build output
-        edge_index = torch.stack((sender, receiver))  # [2, n_edges]
-
-        # From the docs: With the shift vector S, the distances D between atoms can be computed from
-        # D = positions[j]-positions[i]+S.dot(cell)
-        # shifts = torch.dot(unit_shifts, self.inp_dict["cell"])  # [n_edges, 3]
-        inp_dict_this_config = self.inp_dict.copy()
-        inp_dict_this_config["positions"] = positions
-        inp_dict_this_config["edge_index"] = edge_index
-        # inp_dict_this_config["shifts"] = shifts
-        # inp_dict_this_config[""] =
-        res = self.model(inp_dict_this_config)
-        return (res["energy"], res["forces"])
 
 
 class MACE_openmm(torch.nn.Module):
@@ -105,6 +48,8 @@ class MACE_openmm(torch.nn.Module):
         self.device = torch.device(device)
         self.atom_indices = atom_indices
         self.dtype = dtype
+
+        self.register_buffer("ev_to_kj_mol", torch.tensor(mol / kJ))
         dat = compile_model(model_path)
         # TODO: if only the topology was passed, create the config from this
         config = data.config_from_atoms(atoms_obj)
@@ -169,10 +114,15 @@ class MACE_openmm(torch.nn.Module):
         inp_dict_this_config["shifts"] = shifts_idx
         # inp_dict_this_config["shifts"] = shifts
         # inp_dict_this_config[""] =
-        res = self.model(inp_dict_this_config)
-        # return (res["energy"], res["forces"])
-        return res["scaled_interaction_energy"]
-        # return res["energy"]
+        conversion_factor = self.ev_to_kj_mol
+
+        
+        res = self.model(inp_dict_this_config) 
+        interaction_energy = res["interaction_energy"]
+        if interaction_energy is None:
+            interaction_energy = torch.tensor(0., device=self.device) 
+       
+        return interaction_energy * conversion_factor
 
 
 class MacePotentialImplFactory(MLPotentialImplFactory):
