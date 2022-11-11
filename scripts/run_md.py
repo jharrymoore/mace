@@ -3,7 +3,7 @@ from mace.tools.mixed_system import MixedSystem
 from mace import tools
 import logging
 import os
-
+import torch
 
 def main():
     parser = ArgumentParser()
@@ -30,6 +30,8 @@ def main():
         help="output file for the pdb reporter",
     )
     parser.add_argument("--log_level", default=logging.INFO, type=int)
+    parser.add_argument("--dtype", default="float64", choices=["float32", "float64"])
+    parser.add_argument("--neighbour_list", default="torch_nl", choices=["torch_nl", "torch_nl_n2"])
     parser.add_argument("--log_dir", default="./logs")
     parser.add_argument(
         "--storage_path",
@@ -60,6 +62,13 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.dtype== 'float32':
+        logging.warning("Running with single precision - this can lead to numerical stability issues")
+        torch.set_default_dtype(torch.float32)
+        dtype = torch.float32
+    elif args.dtype== 'float64':
+        torch.set_default_dtype(torch.float64)
+        dtype = torch.float64
     tools.setup_logger(level=args.log_level, directory=args.log_dir)
 
     mixed_system = MixedSystem(
@@ -74,6 +83,9 @@ def main():
         padding=args.padding,
         temperature=args.temperature,
         repex_storage_path=args.storage_path,
+        dtype=dtype,
+        neighbour_list=args.neighbour_list
+
     )
     if args.run_type == "md":
         mixed_system.run_mixed_md(args.steps, args.interval, args.output_file)

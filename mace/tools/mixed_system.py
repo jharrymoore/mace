@@ -53,7 +53,6 @@ def get_xyz_from_mol(mol):
 
 
 MLPotential.registerImplFactory("mace", MacePotentialImplFactory())
-torch.set_default_dtype(torch.float64)
 # platform = Platform.getPlatformByName("CUDA")
 # platform.setPropertyDefaultValue("DeterministicForces", "true")
 
@@ -74,6 +73,8 @@ class MixedSystem:
         potential: str,
         temperature: float,
         repex_storage_path: str,
+        dtype: torch.dtype,
+        neighbour_list: str,
         friction_coeff: float = 1.0,
         timestep: float = 1,
     ) -> None:
@@ -88,6 +89,10 @@ class MixedSystem:
         self.friction_coeff = friction_coeff / picosecond
         self.timestep = timestep * femtosecond
         self.repex_storage_path = repex_storage_path
+        self.dtype = dtype
+        self.neighbour_list = neighbour_list
+        self.openmm_precision = "Double" if dtype == torch.float64 else "Mixed"
+        logger.debug(f"OpenMM will use {self.openmm_precision} precision")
 
         self.mixed_system, self.modeller = self.create_mixed_system(
             file=file, smiles=smiles, model_path=model_path
@@ -178,8 +183,6 @@ class MixedSystem:
                 # TODO: why are the constarints causing us issues
                 # Empirically it looks like we avoid integrator issues with the MCMC if we have constraints on for the ligand, and off for the protein
                 constraints=HBonds if not turn_off_constraints else None,
-                # constraints=HBonds,
-                # rigidWater=True,
             )
 
             mixed_system = MixedSystemConstructor(
@@ -189,16 +192,12 @@ class MixedSystem:
                 nnp_potential=self.potential,
                 atoms_obj=atoms,
                 filename=model_path,
+                dtype=self.dtype,
+                nl = self.neighbour_list
             ).mixed_system
 
         return mixed_system, modeller
 
-    # def create_pure_ml_system(self, file: str, model_path: str) -> System:
-    #     """Calls the createSystem from the ml potential directly, instead of the mixed system.  Useful for materials systems etc where openMM cannot generate parameters in the first place
-    #     """
-
-    #     input_file = PDBFile(file)
-    #     self.
 
     def run_mixed_md(self, steps: int, interval: int, output_file: str) -> float:
         """Runs plain MD on the mixed system, writes a pdb trajectory
@@ -214,7 +213,7 @@ class MixedSystem:
             self.modeller.topology,
             self.mixed_system,
             integrator,
-            platformProperties={"Precision": "Mixed"},
+            platformProperties={"Precision": self.openmm_precision},
         )
         simulation.context.setPositions(self.modeller.getPositions())
 

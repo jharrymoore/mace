@@ -13,9 +13,6 @@ from ase import Atoms
 from openmm.app import Topology
 
 
-# torch.set_default_dtype(torch.float64)
-
-
 def compile_model(model_path):
     model = torch.load(model_path)
     res = {}
@@ -91,8 +88,9 @@ class MACE_openmm(torch.nn.Module):
     def __init__(
         self,
         model_path: str,
+        dtype: torch.dtype,
         atom_indices: Optional[Iterable] = None,
-        nl: str = "torch_nl_n2",
+        nl: str = "torch_nl",
         atoms_obj: Optional[Atoms] = None,
         topology: Optional[Topology] = None,
         device: str = "cuda",
@@ -106,6 +104,7 @@ class MACE_openmm(torch.nn.Module):
             raise NotImplementedError
         self.device = torch.device(device)
         self.atom_indices = atom_indices
+        self.dtype = dtype
         dat = compile_model(model_path)
         # TODO: if only the topology was passed, create the config from this
         config = data.config_from_atoms(atoms_obj)
@@ -138,7 +137,7 @@ class MACE_openmm(torch.nn.Module):
         )
         positions = positions * 10
         boxVectors = boxVectors * 10
-        boxVectors = boxVectors.type(torch.float64).to(self.device)
+        boxVectors = boxVectors.type(self.dtype).to(self.device)
         bbatch = torch.zeros(positions.shape[0], dtype=torch.long, device=self.device)
         mapping, batch_mapping, shifts_idx = self.nl(
             cutoff=self.r_max,
@@ -146,6 +145,7 @@ class MACE_openmm(torch.nn.Module):
             cell=boxVectors,
             pbc=torch.tensor([True, True, True], device=self.device),
             batch=bbatch,
+            dtype=self.dtype
         )
 
         # Eliminate self-edges that don't cross periodic boundaries
@@ -195,8 +195,7 @@ class MacePotentialImpl(MLPotentialImpl):
         system: openmm.System,
         atoms: Optional[Iterable[int]],
         forceGroup: int,
-        # FIXME: this should not be a hardcoded filepath
-        filename: str = "/home/jhm72/rds/hpc-work/mace-openmm/tests/test_openmm/MACE_SPICE.model",
+        filename: str,
         implementation: str = "nnpops",
         **args,
     ):
