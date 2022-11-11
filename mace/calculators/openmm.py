@@ -145,7 +145,7 @@ class MACE_openmm(torch.nn.Module):
             cell=boxVectors,
             pbc=torch.tensor([True, True, True], device=self.device),
             batch=bbatch,
-            dtype=self.dtype
+            dtype=self.dtype,
         )
 
         # Eliminate self-edges that don't cross periodic boundaries

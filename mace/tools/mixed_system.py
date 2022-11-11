@@ -193,11 +193,10 @@ class MixedSystem:
                 atoms_obj=atoms,
                 filename=model_path,
                 dtype=self.dtype,
-                nl = self.neighbour_list
+                nl=self.neighbour_list,
             ).mixed_system
 
         return mixed_system, modeller
-
 
     def run_mixed_md(self, steps: int, interval: int, output_file: str) -> float:
         """Runs plain MD on the mixed system, writes a pdb trajectory
