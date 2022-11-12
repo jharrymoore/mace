@@ -114,7 +114,7 @@ class MACE_openmm(torch.nn.Module):
         # inp_dict_this_config[""] =
         conversion_factor = self.ev_to_kj_mol
 
-        res = self.model(inp_dict_this_config)
+        res = self.model(inp_dict_this_config, compute_forces=False)
         interaction_energy = res["interaction_energy"]
         if interaction_energy is None:
             interaction_energy = torch.tensor(0.0, device=self.device)

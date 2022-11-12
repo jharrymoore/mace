@@ -143,8 +143,7 @@ class MACE(torch.nn.Module):
         self,
         data: Dict[str, torch.Tensor],
         training: bool = False,
-        # Not sure about this
-        compute_force: bool = False,
+        compute_force: bool = True,
         compute_virials: bool = False,
         compute_stress: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
