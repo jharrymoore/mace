@@ -15,6 +15,7 @@ from openmm.app import Topology
 
 from ase.units import kJ, mol
 
+
 def compile_model(model_path):
     model = torch.load(model_path)
     res = {}
@@ -22,9 +23,6 @@ def compile_model(model_path):
     res["z_table"] = utils.AtomicNumberTable([int(z) for z in model.atomic_numbers])
     res["r_max"] = model.r_max
     return res
-
-  
-
 
 
 class MACE_openmm(torch.nn.Module):
@@ -116,12 +114,11 @@ class MACE_openmm(torch.nn.Module):
         # inp_dict_this_config[""] =
         conversion_factor = self.ev_to_kj_mol
 
-        
-        res = self.model(inp_dict_this_config) 
+        res = self.model(inp_dict_this_config)
         interaction_energy = res["interaction_energy"]
         if interaction_energy is None:
-            interaction_energy = torch.tensor(0., device=self.device) 
-       
+            interaction_energy = torch.tensor(0.0, device=self.device)
+
         return interaction_energy * conversion_factor
 
 

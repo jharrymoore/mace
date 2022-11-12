@@ -324,7 +324,7 @@ class ScaleShiftMACE(MACE):
         )  # [n_graphs,]
 
         # Add E_0 and (scaled) interaction energy
-        total_energy = e0 + inter_e 
+        total_energy = e0 + inter_e
         # convert from eV to kJ/mol for OpenMM
 
         forces, virials, stress = get_outputs(
