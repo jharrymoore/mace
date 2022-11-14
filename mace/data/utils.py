@@ -13,7 +13,6 @@ import ase.io
 import numpy as np
 
 from mace.tools import AtomicNumberTable
-from openmm.app import Topology
 
 Vector = np.ndarray  # [3,]
 Positions = np.ndarray  # [..., 3]
@@ -61,11 +60,6 @@ def random_train_valid_split(
         [items[i] for i in indices[:train_size]],
         [items[i] for i in indices[train_size:]],
     )
-
-
-def config_from_topology(topology: Topology):
-    # TODO
-    raise NotImplementedError
 
 
 def config_from_atoms_list(

@@ -34,7 +34,7 @@ def compute_forces(
     ]  # [n_nodes, 3]
     if gradient is None:
         return torch.zeros_like(positions)
-    return -1 * gradient 
+    return -1 * gradient
 
 
 def compute_forces_virials(
