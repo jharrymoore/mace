@@ -14,15 +14,27 @@ Requirements:
 If you do not have CUDA pre-installed, it is **recommended** to follow the conda installation process:
 ```sh
 # Create a virtual environment and activate it
-conda create mace_env
-conda activate mace_env
-
-# Install PyTorch
-conda install pytorch torchvision torchaudio cudatoolkit=11.1 -c pytorch-lts -c conda-forge
 
 # Clone and install MACE (and all required packages), use token if still private repo
-git clone git@github.com:ACEsuit/mace.git 
-pip install ./mace
+git clone git@github.com:jharrymoore/mace.git
+cd mace
+mamba env create -f environment.yml
+conda activate mlmm_dev
+pip install .
+cd ..
+git clone git@github.com:jharrymoore/openmmtools.git
+cd openmmtools
+git checkout ommml_compat
+pip install .
+cd ..
+git clone git@github.com:jharrymoore/torch_nl.git
+cd torch_nl
+git checkout development
+pip install .
+cd ..
+git clone git@github.com:openmm/openmm-ml.git
+cd openmm-ml
+pip install .
 ```
 
 ### pip installation
