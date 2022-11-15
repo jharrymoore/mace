@@ -10,6 +10,7 @@ from ase.calculators.calculator import Calculator, all_changes
 
 from mace import data
 from mace.tools import torch_geometric, torch_tools, utils
+from typing import List
 
 
 class MACECalculator(Calculator):

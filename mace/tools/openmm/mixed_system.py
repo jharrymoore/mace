@@ -2,18 +2,15 @@ import sys
 from ase.io import read
 import torch
 import time
-from argparse import ArgumentParser
 import numpy as np
 import sys
-from rdkit import Chem
 from ase import Atoms
 from openmm.openmm import System
-from openmm import unit
-from openmm import Platform, LangevinMiddleIntegrator
+from typing import List, Tuple, Optional
+from openmm import LangevinMiddleIntegrator
 from openmmtools.integrators import AlchemicalNonequilibriumLangevinIntegrator
 from openmm.app import (
     Simulation,
-    Topology,
     StateDataReporter,
     ForceField,
     PDBReporter,
@@ -22,7 +19,6 @@ from openmm.app import (
     Modeller,
     PME,
 )
-from typing import List, Optional, Tuple
 from openmm.unit import nanometer, nanometers, molar, angstrom
 from openmm.unit import kelvin, picosecond, femtosecond, kilojoule_per_mole
 from openff.toolkit.topology import Molecule
@@ -63,7 +59,7 @@ class MixedSystem:
     def __init__(
         self,
         file: str,
-        smiles: str,
+        ml_mol: str,
         model_path: str,
         forcefields: List[str],
         resname: str,
@@ -77,6 +73,7 @@ class MixedSystem:
         neighbour_list: str,
         friction_coeff: float = 1.0,
         timestep: float = 1,
+        pure_ml_system: bool = False
     ) -> None:
 
         self.forcefields = forcefields
@@ -95,7 +92,7 @@ class MixedSystem:
         logger.debug(f"OpenMM will use {self.openmm_precision} precision")
 
         self.mixed_system, self.modeller = self.create_mixed_system(
-            file=file, smiles=smiles, model_path=model_path
+            file=file, ml_mol=ml_mol, model_path=model_path, pure_ml_system=pure_ml_system
         )
 
     def initialize_mm_forcefield(self, molecule: Optional[Molecule] = None):
@@ -106,19 +103,25 @@ class MixedSystem:
             forcefield.registerTemplateGenerator(smirnoff.generator)
         return forcefield
 
-    def initialize_ase_atoms_from_smiles(self, smiles: str) -> Tuple[Atoms, Molecule]:
-        molecule = Molecule.from_smiles(smiles)
+    def initialize_ase_atoms_from_smiles(self, ml_mol: str) -> Tuple[Atoms, Molecule]:
+        # ml_mol can be a path to a file, or a smiles string
+        if os.path.isfile(ml_mol):
+            molecule = Molecule.from_file(ml_mol, allow_undefined_stereo=True)
+        else:
+            molecule = Molecule.from_smiles(ml_mol)
+
         _, tmpfile = mkstemp(suffix="xyz")
         molecule._to_xyz_file(tmpfile)
         atoms = read(tmpfile)
         os.remove(tmpfile)
         return atoms, molecule
 
+
     def create_mixed_system(
         self,
         file: str,
         model_path: str,
-        smiles: str = None,
+        ml_mol: str,
         pure_ml_system: bool = False,
     ) -> Tuple[System, Modeller]:
         """Creates the mixed system from a purely mm system
@@ -129,31 +132,39 @@ class MixedSystem:
         :return Tuple[System, Modeller]: return mixed system and the modeller for topology + position access by downstream methods
         """
         # initialize the ase atoms for MACE
-        atoms, molecule = self.initialize_ase_atoms_from_smiles(smiles)
+        
+        atoms, molecule = self.initialize_ase_atoms_from_smiles(ml_mol)
 
         # Handle a complex, passed as a pdb file
         if file.endswith(".pdb"):
             turn_off_constraints = False
             input_file = PDBFile(file)
+            topology= input_file.getTopology()
 
             # if pure_ml_system specified, we just need to parse the input file
-            if not pure_ml_system:
-                modeller = Modeller(input_file.topology, input_file.positions)
+            # if not pure_ml_system:
+            modeller = Modeller(input_file.topology, input_file.positions)
+            print(f"Initialized topology with {len(input_file.positions)} positions")
 
         # Handle a ligand, passed as an sdf, override the Molecule initialized from smiles
         elif file.endswith(".sdf"):
             turn_off_constraints = True
-            molecule = Molecule.from_file(file)
+            molecule = Molecule.from_file(file, allow_undefined_stereo=True)
+            input_file = molecule
+            topology = molecule.to_topology().to_openmm()
             # Hold positions in nanometers
             positions = get_xyz_from_mol(molecule.to_rdkit()) / 10
+
+            print(f"Initialized topology with {positions.shape} positions")
 
             modeller = Modeller(molecule.to_topology().to_openmm(), positions)
         if pure_ml_system:
             # we have the input_file, create the system directly from the mace potential
-            modeller = None
+            # modeller = None
+            # atoms.set_cell([50,50,50])
             ml_potential = MLPotential("mace")
             ml_system = ml_potential.createSystem(
-                input_file.getTopology(), atoms_obj=atoms, filename=model_path
+                topology, atoms_obj=atoms, filename=model_path, dtype=self.dtype
             )
             return ml_system, modeller
 

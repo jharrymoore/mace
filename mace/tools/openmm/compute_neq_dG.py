@@ -2,14 +2,13 @@ import sys
 from typing import List
 from ase.io import read
 import torch
+from mace.calculators.openmm import MacePotentialImplFactory
 
 import sys
 from openmm import Platform, System, LangevinMiddleIntegrator, State, Vec3
 from openmmtools.integrators import AlchemicalNonequilibriumLangevinIntegrator
 from openmm.app import Simulation, Topology, StateDataReporter
-from openmm.unit import nanometer, nanometers, molar
-from openmm.unit import kelvin, picosecond, femtosecond, kilojoule_per_mole
-from mace.calculators.openmm import MacePotentialImplFactory
+from openmm.unit import kelvin, picosecond, femtosecond
 from openmmml import MLPotential
 import numpy as np
 

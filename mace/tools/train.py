@@ -8,6 +8,7 @@ import dataclasses
 import logging
 import time
 from typing import Any, Dict, Optional, Tuple
+# from torchensemble import VotingRegressor
 
 import numpy as np
 import torch
@@ -26,6 +27,9 @@ from .utils import (
     compute_rel_rmse,
     compute_rmse,
 )
+
+# from joblib import Parallel, delayed
+from copy import deepcopy
 
 
 @dataclasses.dataclass
@@ -365,3 +369,43 @@ def evaluate(
     }
 
     return avg_loss, aux
+
+
+
+def train_ensemble(
+    model: torch.nn.Module,
+    # loss_fn: torch.nn.Module,
+    # train_loader: DataLoader,
+    # valid_loader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    # lr_scheduler: torch.optim.lr_scheduler.ExponentialLR,
+    # start_epoch: int,
+    # max_num_epochs: int,
+    # patience: int,
+    # checkpoint_handler: CheckpointHandler,
+    # logger: MetricsLogger,
+    # eval_interval: int,
+    # output_args: Dict[str, bool],
+    # device: torch.device,
+    # log_errors: str,
+    # swa: Optional[SWAContainer] = None,
+    # ema: Optional[ExponentialMovingAverage] = None,
+    # max_grad_norm: Optional[float] = 10.0,
+    n_estimators: int = 8,
+    **kwargs
+    ):
+    # ensemble = VotingRegressor(estimator=model,
+    #                             n_estimators = n_estimators,
+    #                             )
+    # set a copy of the optimizer, instead of instantiating one from kwargs 
+    # ensemble.set_optimizer(optimizer)   
+    optimizers = [deepcopy(optimizer) for _ in range(n_estimators)]
+    # # Same thing, just one scheduler for the whole ensemnle this time
+    # ensemble.set_scheduler(lr_scheduler)                         
+
+
+    # ensembole.fit(train_loader, epochs=max_num_epochs)
+    with Parallel(n_jobs=n_estimators) as parallel:
+        outputs = parallel(
+            delayed(train)()
+        )

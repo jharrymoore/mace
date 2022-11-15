@@ -1,5 +1,5 @@
 from argparse import ArgumentParser
-from mace.tools.mixed_system import MixedSystem
+from mace.tools.openmm.mixed_system import MixedSystem
 from mace import tools
 import logging
 import os
@@ -11,7 +11,7 @@ def main():
 
     parser.add_argument("--file", "-f", type=str)
     parser.add_argument(
-        "--smiles", type=str, help="smiles for the small molecule", default=None
+        "--ml_mol", type=str, help="either smiles string or file path for the small molecule to be described by MACE", default=None
     )
     parser.add_argument(
         "--run_type", choices=["md", "repex", "neq"], type=str, default="md"
@@ -45,7 +45,7 @@ def main():
     parser.add_argument(
         "--forcefields",
         type=list,
-        default=["amber/protein.ff14SB.xml", "amber/tip3p_standard.xml"],
+        default=["amber/protein.ff14SB.xml", "amber/tip3p_standard.xml","amber14/DNA.OL15.xml"],
     )
     parser.add_argument(
         "--interval", help="steps between saved frames", type=int, default=100
@@ -63,6 +63,7 @@ def main():
         help="path to the mace model",
         default="tests/test_openmm/MACE_SPICE.model",
     )
+    parser.add_argument("--pure_ml_system", action="store_true")
     args = parser.parse_args()
 
     if args.dtype == "float32":
@@ -78,7 +79,7 @@ def main():
 
     mixed_system = MixedSystem(
         file=args.file,
-        smiles=args.smiles,
+        ml_mol=args.ml_mol,
         model_path=args.model_path,
         forcefields=args.forcefields,
         resname=args.resname,
@@ -90,6 +91,7 @@ def main():
         repex_storage_path=args.storage_path,
         dtype=dtype,
         neighbour_list=args.neighbour_list,
+        pure_ml_system=args.pure_ml_system
     )
     if args.run_type == "md":
         mixed_system.run_mixed_md(args.steps, args.interval, args.output_file)

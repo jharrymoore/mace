@@ -20,6 +20,7 @@ from utils import create_error_table, get_dataset_from_xyz
 import mace
 from mace import data, modules, tools
 from mace.tools import torch_geometric
+from torchensemble import VotingRegressor
 
 
 def main() -> None:
@@ -360,27 +361,51 @@ def main() -> None:
     logging.info(model)
     logging.info(f"Number of parameters: {tools.count_parameters(model)}")
     logging.info(f"Optimizer: {optimizer}")
-
-    tools.train(
-        model=model,
-        loss_fn=loss_fn,
-        train_loader=train_loader,
-        valid_loader=valid_loader,
-        optimizer=optimizer,
-        lr_scheduler=lr_scheduler,
-        checkpoint_handler=checkpoint_handler,
-        eval_interval=args.eval_interval,
-        start_epoch=start_epoch,
-        max_num_epochs=args.max_num_epochs,
-        logger=logger,
-        patience=args.patience,
-        output_args=output_args,
-        device=device,
-        swa=swa,
-        ema=ema,
-        max_grad_norm=args.clip_grad,
-        log_errors=args.error_table,
-    )
+    if args.train_ensemble:
+       tools.train_ensemble(
+            model=model,
+            loss_fn=loss_fn,
+            train_loader=train_loader,
+            valid_loader=valid_loader,
+            optimizer=optimizer,
+            lr_scheduler=lr_scheduler,
+            checkpoint_handler=checkpoint_handler,
+            eval_interval=args.eval_interval,
+            start_epoch=start_epoch,
+            max_num_epochs=args.max_num_epochs,
+            logger=logger,
+            patience=args.patience,
+            output_args=output_args,
+            device=device,
+            swa=swa,
+            ema=ema,
+            max_grad_norm=args.clip_grad,
+            log_errors=args.error_table,
+       ) 
+    
+    
+    else:
+        tools.train(
+            model=model,
+            loss_fn=loss_fn,
+            train_loader=train_loader,
+            valid_loader=valid_loader,
+            optimizer_name=args.optimizer,
+            optimizer_kwargs = param_options,
+            lr_scheduler=lr_scheduler,
+            checkpoint_handler=checkpoint_handler,
+            eval_interval=args.eval_interval,
+            start_epoch=start_epoch,
+            max_num_epochs=args.max_num_epochs,
+            logger=logger,
+            patience=args.patience,
+            output_args=output_args,
+            device=device,
+            swa=swa,
+            ema=ema,
+            max_grad_norm=args.clip_grad,
+            log_errors=args.error_table,
+        )
 
     # Evaluation on test datasets
     logging.info("Computing metrics for training, validation, and test sets")

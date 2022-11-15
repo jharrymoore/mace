@@ -3,7 +3,6 @@ import time
 import torch
 from torch_nl import compute_neighborlist, compute_neighborlist_n2
 import mace
-from mace.calculators.neighbour_list_torch import primitive_neighbor_list_torch
 from mace import data
 from mace.tools import torch_geometric, utils
 from typing import Optional, Iterable, List
@@ -104,17 +103,13 @@ class MACE_openmm(torch.nn.Module):
         edge_index = torch.stack((sender, receiver))
 
         # From the docs: With the shift vector S, the distances D between atoms can be computed from
-        # D = positions[j]-positions[i]+S.dot(cell)
-        # shifts = torch.dot(unit_shifts, self.inp_dict["cell"])  # [n_edges, 3]
         inp_dict_this_config = self.inp_dict.copy()
         inp_dict_this_config["positions"] = positions.to(self.device)
         inp_dict_this_config["edge_index"] = edge_index
         inp_dict_this_config["shifts"] = shifts_idx
-        # inp_dict_this_config["shifts"] = shifts
-        # inp_dict_this_config[""] =
         conversion_factor = self.ev_to_kj_mol
 
-        res = self.model(inp_dict_this_config, compute_forces=False)
+        res = self.model(inp_dict_this_config, compute_force=False)
         interaction_energy = res["interaction_energy"]
         if interaction_energy is None:
             interaction_energy = torch.tensor(0.0, device=self.device)
