@@ -7,6 +7,7 @@
 from typing import Optional, Sequence
 
 import torch.utils.data
+import torch
 
 from mace.tools import (
     AtomicNumberTable,
@@ -110,6 +111,10 @@ class AtomicData(torch_geometric.data.Data):
     def from_config(
         cls, config: Configuration, z_table: AtomicNumberTable, cutoff: float
     ) -> "AtomicData":
+        # if the model returns a 0-dim tensor, ase will complain when parsing the cutoff
+        if type(cutoff) == torch.Tensor and cutoff.dim() == 0:
+            cutoff = cutoff.item()
+
         edge_index, shifts, unit_shifts = get_neighborhood(
             positions=config.positions, cutoff=cutoff, pbc=config.pbc, cell=config.cell
         )
