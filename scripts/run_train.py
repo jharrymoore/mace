@@ -469,6 +469,7 @@ def main() -> None:
     if args.wandb:
         logging.info("Using Weights and Biases for logging")
         import wandb
+
         wandb_config = {}
         args_dict = vars(args)
         args_dict_json = json.dumps(args_dict)

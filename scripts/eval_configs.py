@@ -10,6 +10,7 @@ import ase.data
 import ase.io
 import numpy as np
 import torch
+from tqdm import tqdm
 
 from mace import data
 from mace.tools import torch_geometric, utils, torch_tools
@@ -17,21 +18,9 @@ from mace.tools import torch_geometric, utils, torch_tools
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--configs", 
-        help="path to XYZ configurations", 
-        required=True
-    )
-    parser.add_argument(
-        "--model", 
-        help="path to model", 
-        required=True
-    )
-    parser.add_argument(
-        "--output", 
-        help="output path", 
-        required=True
-    )
+    parser.add_argument("--configs", help="path to XYZ configurations", required=True)
+    parser.add_argument("--model", help="path to model", required=True)
+    parser.add_argument("--output", help="output path", required=True)
     parser.add_argument(
         "--device",
         help="select device",
@@ -46,12 +35,7 @@ def parse_args() -> argparse.Namespace:
         choices=["float32", "float64"],
         default="float64",
     )
-    parser.add_argument(
-        "--batch_size", 
-        help="batch size", 
-        type=int, 
-        default=64
-    )
+    parser.add_argument("--batch_size", help="batch size", type=int, default=64)
     parser.add_argument(
         "--compute_stress",
         help="compute stress",
@@ -86,16 +70,20 @@ def main():
     configs = [data.config_from_atoms(atoms) for atoms in atoms_list]
 
     z_table = utils.AtomicNumberTable([int(z) for z in model.atomic_numbers])
-
+    print("preparing dataset...")
+    print(len(configs))
     data_loader = torch_geometric.dataloader.DataLoader(
         dataset=[
-            data.AtomicData.from_config(config, z_table=z_table, cutoff=float(model.r_max))
-            for config in configs
+            data.AtomicData.from_config(
+                config, z_table=z_table, cutoff=float(model.r_max)
+            )
+            for config in tqdm(configs)
         ],
         batch_size=args.batch_size,
         shuffle=False,
         drop_last=False,
     )
+    print("...done")
 
     # Collect data
     energies_list = []
@@ -104,6 +92,7 @@ def main():
     forces_collection = []
 
     for batch in data_loader:
+        print(batch)
         batch = batch.to(device)
         output = model(batch.to_dict(), compute_stress=args.compute_stress)
         energies_list.append(torch_tools.to_numpy(output["energy"]))
@@ -114,7 +103,9 @@ def main():
             contributions_list.append(torch_tools.to_numpy(output["contributions"]))
 
         forces = np.split(
-            torch_tools.to_numpy(output["forces"]), indices_or_sections=batch.ptr[1:], axis=0
+            torch_tools.to_numpy(output["forces"]),
+            indices_or_sections=batch.ptr[1:],
+            axis=0,
         )
         forces_collection.append(forces[:-1])  # drop last as its emtpy
 
@@ -122,7 +113,7 @@ def main():
     forces_list = [
         forces for forces_list in forces_collection for forces in forces_list
     ]
-    assert len(atoms_list) == len(energies) == len(forces_list) 
+    assert len(atoms_list) == len(energies) == len(forces_list)
     if args.compute_stress:
         stresses = np.concatenate(stresses_list, axis=0)
         assert len(atoms_list) == stresses.shape[0]
