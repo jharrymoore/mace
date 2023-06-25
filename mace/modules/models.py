@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Type
 import numpy as np
 import torch
 from e3nn import o3
+from tqdm import tqdm
 from e3nn.util.jit import compile_mode
 
 from mace.data import AtomicData
@@ -247,6 +248,123 @@ class MACE(torch.nn.Module):
         }
 
 
+# @compile_mode("script")
+# class ScaleShiftMACE(MACE):
+#     def __init__(
+#         self,
+#         atomic_inter_scale: float,
+#         atomic_inter_shift: float,
+#         **kwargs,
+#     ):
+#         super().__init__(**kwargs)
+#         self.scale_shift = ScaleShiftBlock(
+#             scale=atomic_inter_scale, shift=atomic_inter_shift
+#         )
+
+#     def forward(
+#         self,
+#         data: Dict[str, torch.Tensor],
+#         training: bool = False,
+#         compute_force: bool = True,
+#         compute_virials: bool = False,
+#         compute_stress: bool = False,
+#         compute_displacement: bool = False,
+#     ) -> Dict[str, Optional[torch.Tensor]]:
+#         # Setup
+#         print(data.keys())
+#         print(data["batch"])
+#         data["positions"].requires_grad_(True)
+#         num_graphs = data["ptr"].numel() - 1
+#         displacement = torch.zeros(
+#             (num_graphs, 3, 3),
+#             dtype=data["positions"].dtype,
+#             device=data["positions"].device,
+#         )
+#         if compute_virials or compute_stress or compute_displacement:
+#             (
+#                 data["positions"],
+#                 data["shifts"],
+#                 displacement,
+#             ) = get_symmetric_displacement(
+#                 positions=data["positions"],
+#                 unit_shifts=data["unit_shifts"],
+#                 cell=data["cell"],
+#                 edge_index=data["edge_index"],
+#                 num_graphs=num_graphs,
+#                 batch=data["batch"],
+#             )
+
+#         # Atomic energies
+#         node_e0 = self.atomic_energies_fn(data["node_attrs"])
+#         e0 = scatter_sum(
+#             src=node_e0, index=data["batch"], dim=-1, dim_size=num_graphs
+#         )  # [n_graphs,]
+
+#         # Embeddings
+#         node_feats = self.node_embedding(data["node_attrs"])
+#         vectors, lengths = get_edge_vectors_and_lengths(
+#             positions=data["positions"],
+#             edge_index=data["edge_index"],
+#             shifts=data["shifts"],
+#         )
+#         edge_attrs = self.spherical_harmonics(vectors)
+#         edge_feats = self.radial_embedding(lengths)
+
+#         # Interactions
+#         node_es_list = []
+#         for interaction, product, readout in zip(
+#             self.interactions, self.products, self.readouts
+#         ):
+#             node_feats, sc = interaction(
+#                 node_attrs=data["node_attrs"],
+#                 node_feats=node_feats,
+#                 edge_attrs=edge_attrs,
+#                 edge_feats=edge_feats,
+#                 edge_index=data["edge_index"],
+#             )
+#             node_feats = product(
+#                 node_feats=node_feats, sc=sc, node_attrs=data["node_attrs"]
+#             )
+#             node_es_list.append(readout(node_feats).squeeze(-1))  # {[n_nodes, ], }
+
+#         # Sum over interactions
+#         node_inter_es = torch.sum(
+#             torch.stack(node_es_list, dim=0), dim=0
+#         )  # [n_nodes, ]
+#         node_inter_es = self.scale_shift(node_inter_es)
+
+#         # Sum over nodes in graph
+#         inter_e = scatter_sum(
+#             src=node_inter_es, index=data["batch"], dim=-1, dim_size=num_graphs
+#         )  # [n_graphs,]
+
+#         # Add E_0 and (scaled) interaction energy
+#         total_energy = e0 + inter_e
+#         node_energy = node_e0 + node_inter_es
+
+#         forces, virials, stress = get_outputs(
+#             energy=inter_e,
+#             positions=data["positions"],
+#             displacement=displacement,
+#             cell=data["cell"],
+#             training=training,
+#             compute_force=compute_force,
+#             compute_virials=compute_virials,
+#             compute_stress=compute_stress,
+#         )
+
+#         output = {
+#             "energy": total_energy,
+#             "node_energy": node_energy,
+#             "interaction_energy": inter_e,
+#             "forces": forces,
+#             "virials": virials,
+#             "stress": stress,
+#             "displacement": displacement,
+#         }
+
+#         return output
+
 @compile_mode("script")
 class ScaleShiftMACE(MACE):
     def __init__(
@@ -328,7 +446,7 @@ class ScaleShiftMACE(MACE):
         node_inter_es = torch.sum(
             torch.stack(node_es_list, dim=0), dim=0
         )  # [n_nodes, ]
-        node_inter_es = self.scale_shift(node_inter_es)
+        node_inter_es = self.scale_shift(node_inter_es) # [n_nodes, ]
 
         # Sum over nodes in graph
         inter_e = scatter_sum(
@@ -349,6 +467,52 @@ class ScaleShiftMACE(MACE):
             compute_virials=compute_virials,
             compute_stress=compute_stress,
         )
+
+        # compute coulomb interactions within a cutoff of 12 angstroms - basically everything in the molecule will be included
+        # iterate over each molecule
+        coulomb_forces = torch.zeros_like(forces) # [n_graphs, n_atoms, 3]
+        # print("forces", coulomb_forces.shape)
+        coulomb_energies = torch.zeros_like(node_inter_es)
+        # print("energies", coulomb_energies.shape)
+        # iterate over all atoms in the batch
+        # print("positions", data["positions"].shape)
+        k = 1.6035
+        # compute the distance between each pair of atoms
+        # distances = torch.cdist(data["positions"], data["positions"])
+        for mol in tqdm(data["batch"].unique()):
+            # find all positions where the batch is equal to the current molecule
+            mol_positions = data["positions"][data["batch"] == mol]
+            mol_charges = data["charges"][data["batch"] == mol]
+
+            for i in range(mol_positions.shape[0]):
+                for j in range(i+1, mol_positions.shape[0]):
+                # only calculate the upper triangular part of the matrix
+                # check atoms are in the same molecule
+
+                    # compute forces due to partial charges
+                    # get the distance between the atoms
+                    dist = torch.norm(mol_positions[i] - mol_positions[j])
+                    # dist = distances[pos1][pos2]
+                    # check if the distance is within the cutoff
+                        # compute the force
+                        # coulomb constant in (eV * angstrom) / (e * e)
+                    force_val = mol_charges[j] * mol_charges[i] / (dist**2 * k)
+                    # force on i due to j TODO: might be a sign error here
+                    coulomb_forces[i] -= force_val
+                    # force on j due to i
+                    coulomb_forces[j] += force_val
+                    # compute the energy - add the due to the i-j interacion to both i and j
+                    c_energy = force_val * dist
+                    coulomb_energies[i] += c_energy
+                    coulomb_energies[j] += c_energy
+
+        # do the scatter sum on the coulomb energies
+        coulomb_energies = scatter_sum(
+            src=coulomb_energies, index=data["batch"], dim=-1, dim_size=num_graphs
+        )  # [n_graphs,]
+        forces += coulomb_forces
+        total_energy += coulomb_energies
+
 
         output = {
             "energy": total_energy,

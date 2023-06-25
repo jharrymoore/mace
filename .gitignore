@@ -18,3 +18,7 @@ build/
 .vscode/
 logs/MACE_run-5.log
 *.txt
+
+
+training_jobs/
+wandb/
