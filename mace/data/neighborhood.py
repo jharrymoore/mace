@@ -7,6 +7,8 @@
 from typing import Optional, Tuple
 import ase.neighborlist
 import numpy as np
+from matscipy.neighbours import neighbour_list  
+from time import time
 
 
 def get_neighborhood(
@@ -24,16 +26,30 @@ def get_neighborhood(
 
     assert len(pbc) == 3 and all(isinstance(i, (bool, np.bool_)) for i in pbc)
     assert cell.shape == (3, 3)
-
-    sender, receiver, unit_shifts = ase.neighborlist.primitive_neighbor_list(
+    # t1 = time()
+    # sender, receiver, unit_shifts = ase.neighborlist.primitive_neighbor_list(
+    #     quantities="ijS",
+    #     pbc=pbc,
+    #     cell=cell,
+    #     positions=positions,
+    #     cutoff=cutoff,
+    #     self_interaction=True,  # we want edges from atom to itself in different periodic images
+    #     use_scaled_positions=False,  # positions are not scaled positions
+    # )
+    # t2 = time()
+    # print("time for ase.neighborlist.primitive_neighbor_list: ", t2-t1)
+    # t1 = time()
+    sender, receiver, unit_shifts = neighbour_list(
         quantities="ijS",
         pbc=pbc,
         cell=cell,
         positions=positions,
         cutoff=cutoff,
-        self_interaction=True,  # we want edges from atom to itself in different periodic images
-        use_scaled_positions=False,  # positions are not scaled positions
+        # self_interaction=True,  # we want edges from atom to itself in different periodic images
+        # use_scaled_positions=False,  # positions are not scaled positions
     )
+    # t2 = time()
+    # print("time for matscipy.neighbour_list: ", t2-t1)
 
     if not true_self_interaction:
         # Eliminate self-edges that don't cross periodic boundaries
