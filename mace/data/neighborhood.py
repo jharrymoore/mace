@@ -7,7 +7,7 @@
 from typing import Optional, Tuple
 import ase.neighborlist
 import numpy as np
-from matscipy.neighbours import neighbour_list  
+from matscipy.neighbours import neighbour_list
 from time import time
 
 

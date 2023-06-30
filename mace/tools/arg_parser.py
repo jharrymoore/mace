@@ -81,6 +81,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "ScaleShiftBOTNet",
             "AtomicDipolesMACE",
             "EnergyDipolesMACE",
+            "QEqMACE",
         ],
     )
     parser.add_argument(
@@ -271,10 +272,14 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "stress",
             "dipole",
             "energy_forces_dipole",
+            "energy_forces_charges"
         ],
     )
     parser.add_argument(
         "--forces_weight", help="weight of forces loss", type=float, default=10.0
+    )
+    parser.add_argument(
+        "--charges_weight", help="weight of charges loss", type=float, default=1.0
     )
     parser.add_argument(
         "--swa_forces_weight",

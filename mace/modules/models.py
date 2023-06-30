@@ -4,6 +4,7 @@
 # This program is distributed under the MIT License (see MIT.md)
 ###########################################################################################
 
+import re
 from typing import Any, Callable, Dict, List, Optional, Type
 
 import numpy as np
@@ -12,6 +13,7 @@ from e3nn import o3
 from e3nn.util.jit import compile_mode
 
 from mace.data import AtomicData
+from mace.modules.utils import compute_coulomb_energy
 from mace.tools.scatter import scatter_sum
 
 from .blocks import (
@@ -25,8 +27,10 @@ from .blocks import (
     NonLinearReadoutBlock,
     RadialEmbeddingBlock,
     ScaleShiftBlock,
+    LinearElectronegativityReadoutBlock,
 )
 from .utils import (
+    compute_atomic_charges,
     compute_fixed_charge_dipole,
     compute_forces,
     get_edge_vectors_and_lengths,
@@ -63,6 +67,10 @@ class MACE(torch.nn.Module):
         self.register_buffer(
             "num_interactions", torch.tensor(num_interactions, dtype=torch.int64)
         )
+        self.register_buffer(
+            "num_elements", torch.tensor(num_elements, dtype=torch.int64)
+        )
+        self.hidden_irreps = hidden_irreps
         # Embedding
         node_attr_irreps = o3.Irreps([(num_elements, (0, 1))])
         node_feats_irreps = o3.Irreps([(hidden_irreps.count(o3.Irrep(0, 1)), (0, 1))])
@@ -358,6 +366,152 @@ class ScaleShiftMACE(MACE):
             "virials": virials,
             "stress": stress,
             "displacement": displacement,
+        }
+
+        return output
+
+
+@compile_mode("script")
+class QEqMACE(MACE):
+    def __init__(
+        self,
+        atomic_inter_scale: float,
+        atomic_inter_shift: float,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.scale_shift = ScaleShiftBlock(
+            scale=atomic_inter_scale, shift=atomic_inter_shift
+        )
+        # define the element-dependent hardness tensor, this is trainable
+
+        self.hardness = torch.nn.Parameter(
+            torch.zeros(self.num_elements), requires_grad=True
+        )
+
+        # electronetavitity block
+        self.eneg = LinearElectronegativityReadoutBlock(self.hidden_irreps)
+
+    def forward(
+        self,
+        data: Dict[str, torch.Tensor],
+        training: bool = False,
+        compute_force: bool = True,
+        compute_virials: bool = False,
+        compute_stress: bool = False,
+        compute_displacement: bool = False,
+    ) -> Dict[str, Optional[torch.Tensor]]:
+        # Setup
+        data["positions"].requires_grad_(True)
+        num_graphs = data["ptr"].numel() - 1
+        displacement = torch.zeros(
+            (num_graphs, 3, 3),
+            dtype=data["positions"].dtype,
+            device=data["positions"].device,
+        )
+        if compute_virials or compute_stress or compute_displacement:
+            (
+                data["positions"],
+                data["shifts"],
+                displacement,
+            ) = get_symmetric_displacement(
+                positions=data["positions"],
+                unit_shifts=data["unit_shifts"],
+                cell=data["cell"],
+                edge_index=data["edge_index"],
+                num_graphs=num_graphs,
+                batch=data["batch"],
+            )
+
+        # Atomic energies
+        node_e0 = self.atomic_energies_fn(data["node_attrs"])
+        e0 = scatter_sum(
+            src=node_e0, index=data["batch"], dim=-1, dim_size=num_graphs
+        )  # [n_graphs,]
+
+        # Embeddings
+        node_feats = self.node_embedding(data["node_attrs"])
+        vectors, lengths = get_edge_vectors_and_lengths(
+            positions=data["positions"],
+            edge_index=data["edge_index"],
+            shifts=data["shifts"],
+        )
+        edge_attrs = self.spherical_harmonics(vectors)
+        edge_feats = self.radial_embedding(lengths)
+
+        # Interactions
+        node_es_list = []
+        for interaction, product, readout in zip(
+            self.interactions, self.products, self.readouts
+        ):
+            node_feats, sc = interaction(
+                node_attrs=data["node_attrs"],
+                node_feats=node_feats,
+                edge_attrs=edge_attrs,
+                edge_feats=edge_feats,
+                edge_index=data["edge_index"],
+            )
+            node_feats = product(
+                node_feats=node_feats, sc=sc, node_attrs=data["node_attrs"]
+            )
+            node_es_list.append(readout(node_feats).squeeze(-1))  # {[n_nodes, ], }
+
+        # with the final set of node features, predict the electronegativities using a charge equilibration scheme
+        node_eneg = self.eneg(node_feats)
+
+        # compute atomic charges using charge equilibration scheme, using the electronegativities and hardnesses
+        # get the atomic numbers from one hot encoding
+        atomic_num_indices = torch.argmax(data["node_attrs"], dim=1)
+        hardness_vals = torch.tensor([self.hardness[i] for i in atomic_num_indices])
+        atomic_numbers = torch.tensor(
+            [self.atomic_numbers[i] for i in atomic_num_indices]
+        )
+        node_partial_charges = compute_atomic_charges(
+            hardness_vals, node_eneg, data["positions"], 0, atomic_numbers
+        )
+        # print(node_partial_charges.shape)
+        # now compute the energy of the partial charges using ewald summation
+
+        coulomb_energy = compute_coulomb_energy(
+            node_partial_charges,
+            data["positions"],
+        )
+        # print("coulomb energy", coulomb_energy)
+
+        # Sum over interactions
+        node_inter_es = torch.sum(
+            torch.stack(node_es_list, dim=0), dim=0
+        )  # [n_nodes, ]
+        node_inter_es = self.scale_shift(node_inter_es)
+
+        # Sum over nodes in graph
+        inter_e = scatter_sum(
+            src=node_inter_es, index=data["batch"], dim=-1, dim_size=num_graphs
+        )  # [n_graphs,]'
+        # Add E_0 and (scaled) interaction energy and coulomb energy
+        total_energy = e0 + inter_e + coulomb_energy
+        node_energy = node_e0 + node_inter_es
+
+        forces, virials, stress = get_outputs(
+            energy=inter_e + coulomb_energy,
+            positions=data["positions"],
+            displacement=displacement,
+            cell=data["cell"],
+            training=training,
+            compute_force=compute_force,
+            compute_virials=compute_virials,
+            compute_stress=compute_stress,
+        )
+
+        output = {
+            "energy": total_energy,
+            "node_energy": node_energy,
+            "interaction_energy": inter_e,
+            "forces": forces,
+            "virials": virials,
+            "stress": stress,
+            "displacement": displacement,
+            "charges": node_partial_charges,
         }
 
         return output

@@ -5,7 +5,6 @@
 ###########################################################################################
 
 
-
 import time
 import numpy as np
 from typing import List
@@ -15,6 +14,7 @@ from ase.stress import full_3x3_to_voigt_6_stress
 
 from mace import data
 from mace.tools import torch_geometric, torch_tools, utils
+
 
 class MACECalculator(Calculator):
     """MACE ASE Calculator"""
@@ -28,7 +28,7 @@ class MACECalculator(Calculator):
         energy_units_to_eV: float = 1.0,
         length_units_to_A: float = 1.0,
         default_dtype="float64",
-        **kwargs
+        **kwargs,
     ):
         Calculator.__init__(self, **kwargs)
         self.results = {}
@@ -111,7 +111,7 @@ class DipoleMACECalculator(Calculator):
         length_units_to_A: float = 1.0,
         default_dtype="float64",
         charges_key="Qs",
-        **kwargs
+        **kwargs,
     ):
         """
         :param charges_key: str, Array field of atoms object where atomic charges are stored
@@ -185,7 +185,7 @@ class EnergyDipoleMACECalculator(Calculator):
         length_units_to_A: float = 1.0,
         default_dtype="float64",
         charges_key="Qs",
-        **kwargs
+        **kwargs,
     ):
         """
         :param charges_key: str, Array field of atoms object where atomic charges are stored
@@ -272,7 +272,7 @@ class MACEFEPCalculator(Calculator):
         energy_units_to_eV: float = 1.0,
         length_units_to_A: float = 1.0,
         default_dtype="float64",
-        **kwargs
+        **kwargs,
     ):
         Calculator.__init__(self, **kwargs)
         self.inter_results = {
@@ -297,9 +297,8 @@ class MACEFEPCalculator(Calculator):
         )
         torch_tools.set_default_dtype(default_dtype)
 
-
     # pylint: disable=dangerous-default-value
-    def calculate(self, atoms=None,  properties=None, system_changes=all_changes):
+    def calculate(self, atoms=None, properties=None, system_changes=all_changes):
         """
         Calculate properties.
         :param atoms: ase.Atoms object
@@ -310,15 +309,21 @@ class MACEFEPCalculator(Calculator):
         t1 = time.time()
         # create 3 atoms objects, one of which is the original atoms object, then the solvent and solute aotms by indexing
         # state B idx is the state of the non-interacting ligand
-        solvent_idx = [i for i in range(len(atoms)) if i not in self.stateA_idx + self.stateB_idx]
-        solvent_atoms = atoms[
-            solvent_idx
+        solvent_idx = [
+            i for i in range(len(atoms)) if i not in self.stateA_idx + self.stateB_idx
         ]
+        solvent_atoms = atoms[solvent_idx]
         stateA_solute = atoms[self.stateA_idx]
         stateA_all_atoms = stateA_solute + solvent_atoms
-        stateB_solute = atoms[self.stateB_idx] 
+        stateB_solute = atoms[self.stateB_idx]
         stateB_all_atoms = stateB_solute + solvent_atoms
-        all_atoms = [stateA_all_atoms, stateA_solute, stateB_all_atoms,  stateB_solute, solvent_atoms]
+        all_atoms = [
+            stateA_all_atoms,
+            stateA_solute,
+            stateB_all_atoms,
+            stateB_solute,
+            solvent_atoms,
+        ]
 
         for idx, at in enumerate(all_atoms):
 
@@ -351,25 +356,43 @@ class MACEFEPCalculator(Calculator):
             self.inter_results["forces"][idx] = forces * (
                 self.energy_units_to_eV / self.length_units_to_A
             )
-        stateA_isol_forces = np.concatenate((self.inter_results["forces"][1], self.inter_results["forces"][4]), axis=0) 
-        stateB_isol_forces = np.concatenate((self.inter_results["forces"][3], self.inter_results["forces"][4]), axis=0) 
+        stateA_isol_forces = np.concatenate(
+            (self.inter_results["forces"][1], self.inter_results["forces"][4]), axis=0
+        )
+        stateB_isol_forces = np.concatenate(
+            (self.inter_results["forces"][3], self.inter_results["forces"][4]), axis=0
+        )
 
         final_forces = np.zeros((len(atoms), 3))
-        final_forces[self.stateA_idx + solvent_idx ] = self.lmbda * self.inter_results["forces"][0] + (1 - self.lmbda) * (stateA_isol_forces)
-        final_forces[self.stateB_idx + solvent_idx] = (1 - self.lmbda) *  self.inter_results["forces"][2]  + self.lmbda * (stateB_isol_forces)
-
+        final_forces[self.stateA_idx + solvent_idx] = self.lmbda * self.inter_results[
+            "forces"
+        ][0] + (1 - self.lmbda) * (stateA_isol_forces)
+        final_forces[self.stateB_idx + solvent_idx] = (
+            1 - self.lmbda
+        ) * self.inter_results["forces"][2] + self.lmbda * (stateB_isol_forces)
 
         self.results = {
-            "energy": self.lmbda * self.inter_results["energy"][0] + \
-                (1 - self.lmbda) * (self.inter_results["energy"][1] + self.inter_results["energy"][4] ) + \
-                    (1 - self.lmbda) *  self.inter_results["energy"][2]  + self.lmbda * (self.inter_results["energy"][3] + self.inter_results["energy"][4]),
-            "free_energy":self.lmbda * self.inter_results["free_energy"][0] + \
-                (1 - self.lmbda) * (self.inter_results["free_energy"][1] + self.inter_results["free_energy"][4] ) + \
-                    (1 - self.lmbda) *  self.inter_results["free_energy"][2]  + self.lmbda * (self.inter_results["free_energy"][3] + self.inter_results["free_energy"][4]),
+            "energy": self.lmbda * self.inter_results["energy"][0]
+            + (1 - self.lmbda)
+            * (self.inter_results["energy"][1] + self.inter_results["energy"][4])
+            + (1 - self.lmbda) * self.inter_results["energy"][2]
+            + self.lmbda
+            * (self.inter_results["energy"][3] + self.inter_results["energy"][4]),
+            "free_energy": self.lmbda * self.inter_results["free_energy"][0]
+            + (1 - self.lmbda)
+            * (
+                self.inter_results["free_energy"][1]
+                + self.inter_results["free_energy"][4]
+            )
+            + (1 - self.lmbda) * self.inter_results["free_energy"][2]
+            + self.lmbda
+            * (
+                self.inter_results["free_energy"][3]
+                + self.inter_results["free_energy"][4]
+            ),
             # difference between the total forces and the sun is that due to the interactions bettween solute and solvent.
-            "forces":  final_forces,
+            "forces": final_forces,
         }
         t2 = time.time()
         print(f"Time taken for calculation: {t2-t1}")
         # get the final forces acting on the solute
-

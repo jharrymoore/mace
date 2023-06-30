@@ -177,6 +177,12 @@ def main() -> None:
             forces_weight=args.forces_weight,
             dipole_weight=args.dipole_weight,
         )
+    elif args.loss == "energy_forces_charges":
+        loss_fn = modules.WeightedEnergyForcesChargesLoss(
+            energy_weight=args.energy_weight,
+            forces_weight=args.forces_weight,
+            charges_weight=args.charges_weight,
+        )
     else:
         loss_fn = modules.EnergyForcesLoss(
             energy_weight=args.energy_weight, forces_weight=args.forces_weight
@@ -252,6 +258,17 @@ def main() -> None:
             MLP_irreps=o3.Irreps(args.MLP_irreps),
             atomic_inter_scale=std,
             atomic_inter_shift=0.0,
+        )
+    elif args.model == "QEqMACE":
+        mean, std = modules.scaling_classes[args.scaling](train_loader, atomic_energies)
+        model = modules.QEqMACE(
+            **model_config,
+            correlation=args.correlation,
+            gate=modules.gate_dict[args.gate],
+            interaction_cls_first=modules.interaction_classes[args.interaction_first],
+            MLP_irreps=o3.Irreps(args.MLP_irreps),
+            atomic_inter_scale=std,
+            atomic_inter_shift=mean,
         )
     elif args.model == "ScaleShiftMACE":
         mean, std = modules.scaling_classes[args.scaling](train_loader, atomic_energies)

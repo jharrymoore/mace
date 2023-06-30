@@ -79,6 +79,17 @@ class LinearDipoleReadoutBlock(torch.nn.Module):
 
 
 @compile_mode("script")
+class LinearElectronegativityReadoutBlock(torch.nn.Module):
+    def __init__(self, irreps_in: o3.Irreps):
+        super().__init__()
+        self.irreps_out = o3.Irreps("1x0e")  # predict a scalar electronetativity
+        self.linear = o3.Linear(irreps_in=irreps_in, irreps_out=self.irreps_out)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.linear(x)
+
+
+@compile_mode("script")
 class NonLinearDipoleReadoutBlock(torch.nn.Module):
     def __init__(
         self,

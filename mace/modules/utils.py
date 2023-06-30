@@ -4,16 +4,21 @@
 # This program is distributed under the MIT License (see MIT.md)
 ###########################################################################################
 
+from functools import partial
+from turtle import pos
 from typing import List, Optional, Tuple
 
+import ase
 import numpy as np
 import torch
 import torch.nn
 import torch.utils.data
 from scipy.constants import c, e
-
+from e3nn.util.jit import compile_mode
+from zmq import device
 from mace.tools import to_numpy
 from mace.tools.scatter import scatter_sum
+from ase.data import covalent_radii
 
 from .blocks import AtomicEnergiesBlock
 
@@ -248,3 +253,73 @@ def compute_fixed_charge_dipole(
     return scatter_sum(
         src=mu, index=batch.unsqueeze(-1), dim=0, dim_size=num_graphs
     )  # [N_graphs,3]
+
+
+def compute_atomic_charges(
+    hardness: torch.Tensor,
+    electronegativity: torch.Tensor,
+    positions: torch.Tensor,
+    total_charge: int,
+    atomic_numbers: torch.Tensor,
+) -> torch.Tensor:
+    """Use charge equilibration approach to solve linear system of equations and return atomic charges.
+    Uses lagrange multipliers to ensure sum of charges equals total charge on the system"""
+    # get covalent radii from ase
+    # set default device to cuda
+    # torch.set_default_tensor_type(torch.cuda.FloatTensor)
+
+    # E_Qeq = E_elec + \Sigma \chi_i q_i + 0.5 J_i q_i^2
+    # matrix of coefficients
+    A = torch.zeros((len(electronegativity), len(electronegativity)), device=positions.device)
+    #
+    b = torch.zeros((len(electronegativity), 1), device=positions.device)
+    sqrt_pi = torch.sqrt(torch.tensor(torch.pi, device= positions.device))
+
+    # compute the A_ij entries
+    for i in range(len(electronegativity)):
+        for j in range(len(electronegativity)):
+            if i == j:
+                A[i, j] = hardness[i] + (
+                    1 / sqrt_pi * covalent_radii[atomic_numbers[i]]
+                )
+            else:
+                # compute the distance between atoms i and j
+                r_ij = torch.linalg.norm(positions[i] - positions[j])
+                # rms of the covalent radii
+                gamma_ij = torch.sqrt(
+                    torch.tensor(
+                        covalent_radii[atomic_numbers[i]] ** 2
+                        + covalent_radii[atomic_numbers[j]] ** 2
+                    )
+                )
+                # error function
+                A[i, j] = (
+                    torch.erf(
+                        r_ij / (torch.sqrt(torch.tensor(2, device=positions.device))) * gamma_ij
+                    )
+                    / r_ij
+                )
+
+    # solve the linear system of equations using to constraint that the sum of the charges is equal to the total charge with lagrange multipliers
+    A = torch.cat((A, torch.ones((len(electronegativity), 1), device=positions.device)), dim=1)
+    A = torch.cat((A, torch.ones((1, len(electronegativity) + 1), device=positions.device)), dim=0)
+    b = torch.cat((b, torch.tensor([[total_charge]], device=positions.device)), dim=0)
+    print("solve the linear system of equations...")
+    x = torch.linalg.solve(A, b)
+    print("solved!")
+    # return the charges
+    print("charges are", x[:-1])
+    return x[:-1].squeeze()
+
+
+def compute_coulomb_energy(
+    partial_charges: torch.Tensor, positions: torch.Tensor
+) -> torch.Tensor:
+    """Compute the coulomb energy of a system of partial charges"""
+    # compute the pairwise distances
+    # compute the distances, accounting for pbc
+    distances = torch.cdist(positions, positions)
+    # compute the coulomb energy
+    potential = torch.triu(partial_charges * partial_charges / distances, diagonal=1)
+    coulomb_energy = 0.5 * torch.sum(potential)
+    return coulomb_energy
