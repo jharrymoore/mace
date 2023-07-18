@@ -131,6 +131,14 @@ def train(
                 logging.info(
                     f"Epoch {epoch}: loss={valid_loss:.4f}, RMSE_E_per_atom={error_e:.1f} meV, RMSE_F={error_f:.1f} meV / A"
                 )
+            elif log_errors == "PerAtomRMSEcharges":
+                print(eval_metrics)
+                error_e = eval_metrics["rmse_e_per_atom"] * 1e3
+                error_f = eval_metrics["rmse_f"] * 1e3
+                error_c = eval_metrics["charges_rmse"]
+                logging.info(
+                    f"Epoch {epoch}: loss={valid_loss:.4f}, RMSE_E_per_atom={error_e:.1f} meV, RMSE_F={error_f:.1f} meV / A, RMSE_charges={error_c:.1f} e"
+                )
             elif (
                 log_errors == "PerAtomRMSEstressvirials"
                 and eval_metrics["rmse_stress_per_atom"] is not None

@@ -58,6 +58,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         type=str,
         choices=[
             "PerAtomRMSE",
+            "PerAtomRMSEcharges",
             "TotalRMSE",
             "PerAtomRMSEstressvirials",
             "PerAtomMAE",
@@ -65,6 +66,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "DipoleRMSE",
             "DipoleMAE",
             "EnergyDipoleRMSE",
+
         ],
         default="PerAtomRMSE",
     )
@@ -272,7 +274,8 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "stress",
             "dipole",
             "energy_forces_dipole",
-            "energy_forces_charges"
+            "energy_forces_charges",
+            "energy_forces_charges_dipole",
         ],
     )
     parser.add_argument(

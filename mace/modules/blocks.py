@@ -5,14 +5,17 @@
 ###########################################################################################
 
 from abc import abstractmethod
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Dict, Optional, Tuple, Union
+import time
 
 import numpy as np
+from torch import norm
 import torch.nn.functional
 from e3nn import nn, o3
 from e3nn.util.jit import compile_mode
-
+from ase.data import covalent_radii
 from mace.tools.scatter import scatter_sum
+from mace.tools.utils import atomic_numbers_to_indices
 
 from .irreps_tools import (
     linear_out_irreps,
@@ -82,8 +85,8 @@ class LinearDipoleReadoutBlock(torch.nn.Module):
 class LinearElectronegativityReadoutBlock(torch.nn.Module):
     def __init__(self, irreps_in: o3.Irreps):
         super().__init__()
-        self.irreps_out = o3.Irreps("1x0e")  # predict a scalar electronetativity
-        self.linear = o3.Linear(irreps_in=irreps_in, irreps_out=self.irreps_out)
+        # predict a scalar electronetativity
+        self.linear = o3.Linear(irreps_in=irreps_in, irreps_out=o3.Irreps("0e"))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.linear(x)
@@ -205,7 +208,6 @@ class EquivariantProductBasisBlock(torch.nn.Module):
         node_feats = self.symmetric_contractions(node_feats, node_attrs)
         if self.use_sc and sc is not None:
             return self.linear(node_feats) + sc
-
         return self.linear(node_feats)
 
 
@@ -639,3 +641,95 @@ class ScaleShiftBlock(torch.nn.Module):
         return (
             f"{self.__class__.__name__}(scale={self.scale:.6f}, shift={self.shift:.6f})"
         )
+
+@compile_mode("script")
+class ChargeEquilibrationBlock(torch.nn.Module):
+    def __init__(self, num_elements: int):
+        super().__init__()
+
+        self.hardness = torch.nn.Parameter(
+            torch.rand(
+                num_elements,
+            )
+        )
+
+    def forward(
+        self,
+        eneg: torch.Tensor,
+        data: torch.Tensor,
+        atomic_numbers: torch.Tensor,
+    ) -> torch.Tensor:
+
+        device = eneg.device
+        sqrt_pi = torch.sqrt(torch.tensor(torch.pi, device=device))
+        sqrt_2 = torch.sqrt(torch.tensor(2, device=device))
+
+        # count the number of unique entries in batch
+        positions = data['positions']
+        batch_indices = data['batch']
+        unique_batch_indices = torch.unique(batch_indices)
+        # atomic numbers is an unrolled list of atomic numbers for each molecule
+        cov_radii = torch.tensor(covalent_radii, device=device)
+
+        output_partial_charges = []
+        for batch_index in unique_batch_indices:
+            molecule_indices = torch.where(batch_indices == batch_index)
+            mol_positions = positions[molecule_indices]
+            n_atoms = len(mol_positions)
+            total_charge = data["total_charge"][batch_index]
+            mol_atomic_numbers = atomic_numbers[molecule_indices]
+
+
+            atomic_indices = torch.argmax(data["node_attrs"][molecule_indices], dim=1)
+            hardness_vals = self.hardness[atomic_indices]
+            diag_vals = hardness_vals + (         
+                            1 / (sqrt_pi * cov_radii[mol_atomic_numbers])
+                        )
+
+            A = torch.zeros((n_atoms, n_atoms), device=positions.device)
+            # fill in primary diagonal
+            A[torch.arange(n_atoms), torch.arange(n_atoms)] = diag_vals
+
+
+            # compute distances between each pair of atoms
+            distances = torch.cdist(mol_positions, mol_positions)
+            # compute the gamma tensor for the whole molecule
+            
+            # create the gamma tensor without looping
+            gamma_square = torch.zeros_like(A)
+            # fill in diagonal
+            gamma_square[torch.arange(n_atoms), torch.arange(n_atoms)] = torch.square(cov_radii[mol_atomic_numbers])
+
+            sigma = torch.square(cov_radii[mol_atomic_numbers]).view(-1,1)
+            # square each element of sigma
+
+            gamma = sigma + sigma.t()
+
+            # square each element of gamma
+            gamma_square = torch.sqrt(gamma)            
+            
+            gamma = torch.sqrt(gamma_square)
+
+            A = torch.erf(distances / (sqrt_2 * gamma)) / distances
+            # fill in the diagonal
+            A[torch.arange(n_atoms), torch.arange(n_atoms)] = diag_vals
+
+            # solve the linear system of equations using to constraint that the sum of the charges is equal to the total charge with lagrange multipliers
+            A = torch.cat((A, torch.ones((n_atoms, 1), device=positions.device)), dim=1)
+            A = torch.cat(
+                (A, torch.ones((1, n_atoms + 1), device=positions.device)), dim=0
+            )
+
+            b = eneg[molecule_indices]
+            b = torch.cat((b, torch.tensor([[total_charge]], device=positions.device)), dim=0)
+
+        
+            x = torch.linalg.solve(A, b)
+            x = x[:-1].squeeze()
+            output_partial_charges.append(x)
+
+            # check sum of charges is equal to total charge
+
+        # check the sum along the atom axiz is equal to the total charge
+        # print(torch.sum(output_partial_charges, dim=1))
+        return torch.cat(output_partial_charges, dim=0)

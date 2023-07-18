@@ -18,6 +18,8 @@ from .blocks import (
     RealAgnosticResidualInteractionBlock,
     ResidualElementDependentInteractionBlock,
     ScaleShiftBlock,
+    ChargeEquilibrationBlock,
+    LinearElectronegativityReadoutBlock,
 )
 from .loss import (
     DipoleSingleLoss,
@@ -27,7 +29,8 @@ from .loss import (
     WeightedEnergyForcesStressLoss,
     WeightedEnergyForcesVirialsLoss,
     WeightedForcesLoss,
-    WeightedEnergyForcesChargesLoss
+    WeightedEnergyForcesChargesLoss,
+    WeightedEnergyForcesDipolesChargesLoss
 )
 from .models import (
     MACE,

@@ -13,6 +13,7 @@ from e3nn import o3
 from e3nn.util.jit import compile_mode
 
 from mace.data import AtomicData
+from mace.modules.blocks import ChargeEquilibrationBlock
 from mace.modules.utils import compute_coulomb_energy
 from mace.tools.scatter import scatter_sum
 
@@ -30,7 +31,6 @@ from .blocks import (
     LinearElectronegativityReadoutBlock,
 )
 from .utils import (
-    compute_atomic_charges,
     compute_fixed_charge_dipole,
     compute_forces,
     get_edge_vectors_and_lengths,
@@ -384,13 +384,11 @@ class QEqMACE(MACE):
             scale=atomic_inter_scale, shift=atomic_inter_shift
         )
         # define the element-dependent hardness tensor, this is trainable
-
-        self.hardness = torch.nn.Parameter(
-            torch.zeros(self.num_elements), requires_grad=True
-        )
-
+        # initialize hardless tensor to random values
+    
         # electronetavitity block
-        self.eneg = LinearElectronegativityReadoutBlock(self.hidden_irreps)
+        self.eneg = LinearReadoutBlock(self.hidden_irreps)
+        self.charge_equil = ChargeEquilibrationBlock(num_elements=self.num_elements)
 
     def forward(
         self,
@@ -409,6 +407,7 @@ class QEqMACE(MACE):
             dtype=data["positions"].dtype,
             device=data["positions"].device,
         )
+        # print all trainable parameters of the network
         if compute_virials or compute_stress or compute_displacement:
             (
                 data["positions"],
@@ -459,24 +458,32 @@ class QEqMACE(MACE):
         # with the final set of node features, predict the electronegativities using a charge equilibration scheme
         node_eneg = self.eneg(node_feats)
 
-        # compute atomic charges using charge equilibration scheme, using the electronegativities and hardnesses
         # get the atomic numbers from one hot encoding
         atomic_num_indices = torch.argmax(data["node_attrs"], dim=1)
-        hardness_vals = torch.tensor([self.hardness[i] for i in atomic_num_indices])
-        atomic_numbers = torch.tensor(
-            [self.atomic_numbers[i] for i in atomic_num_indices]
-        )
-        node_partial_charges = compute_atomic_charges(
-            hardness_vals, node_eneg, data["positions"], 0, atomic_numbers
-        )
-        # print(node_partial_charges.shape)
-        # now compute the energy of the partial charges using ewald summation
+        atomic_numbers = self.atomic_numbers[atomic_num_indices]
 
+        node_partial_charges = self.charge_equil(
+             node_eneg, data, atomic_numbers
+        )
+        # now compute the electrostatic contribution to the energy using regular n^2 summation
         coulomb_energy = compute_coulomb_energy(
             node_partial_charges,
-            data["positions"],
+            data,
         )
         # print("coulomb energy", coulomb_energy)
+        # detach the coulomb energy from the graph so we don't backprop through it, we want to fit the local model features i.e. the energy readout of the mace model using the energy contribution, with the coulomb energy a static contribution, 
+
+        # compute the overall dipole moment due to the partial charges
+
+        batch_dipoles = compute_fixed_charge_dipole(node_partial_charges, data["positions"], data["batch"], num_graphs)
+
+        # print(batch_dipoles, batch_dipoles.shape)
+
+
+        coulomb_energy = coulomb_energy.detach()
+        # still require grad to compute the forces
+        coulomb_energy.requires_grad_(True)
+
 
         # Sum over interactions
         node_inter_es = torch.sum(
@@ -489,11 +496,12 @@ class QEqMACE(MACE):
             src=node_inter_es, index=data["batch"], dim=-1, dim_size=num_graphs
         )  # [n_graphs,]'
         # Add E_0 and (scaled) interaction energy and coulomb energy
-        total_energy = e0 + inter_e + coulomb_energy
+        total_energy = e0 + inter_e + coulomb_energy    
         node_energy = node_e0 + node_inter_es
 
+        # check the hardness tensor
         forces, virials, stress = get_outputs(
-            energy=inter_e + coulomb_energy,
+            energy=inter_e  + coulomb_energy,
             positions=data["positions"],
             displacement=displacement,
             cell=data["cell"],
@@ -502,13 +510,15 @@ class QEqMACE(MACE):
             compute_virials=compute_virials,
             compute_stress=compute_stress,
         )
+        # why is runnin the backward pass here changing the hardness tensor?
 
         output = {
             "energy": total_energy,
             "node_energy": node_energy,
             "interaction_energy": inter_e,
-            "forces": forces,
+            "forces": forces ,
             "virials": virials,
+            "dipole": batch_dipoles,
             "stress": stress,
             "displacement": displacement,
             "charges": node_partial_charges,
@@ -1109,3 +1119,5 @@ class EnergyDipolesMACE(torch.nn.Module):
         }
 
         return output
+
+

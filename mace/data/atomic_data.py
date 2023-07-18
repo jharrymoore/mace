@@ -23,6 +23,7 @@ from .utils import Configuration
 class AtomicData(torch_geometric.data.Data):
     num_graphs: torch.Tensor
     batch: torch.Tensor
+    net_charge: torch.Tensor
     edge_index: torch.Tensor
     node_attrs: torch.Tensor
     edge_vectors: torch.Tensor
@@ -37,6 +38,7 @@ class AtomicData(torch_geometric.data.Data):
     virials: torch.Tensor
     dipole: torch.Tensor
     charges: torch.Tensor
+    total_charge: torch.Tensor
     weight: torch.Tensor
     energy_weight: torch.Tensor
     forces_weight: torch.Tensor
@@ -62,6 +64,7 @@ class AtomicData(torch_geometric.data.Data):
         virials: Optional[torch.Tensor],  # [1,3,3]
         dipole: Optional[torch.Tensor],  # [, 3]
         charges: Optional[torch.Tensor],  # [n_nodes, ]
+        total_charge: Optional[torch.Tensor],  # [,]
     ):
         # Check shapes
         num_nodes = node_attrs.shape[0]
@@ -103,6 +106,7 @@ class AtomicData(torch_geometric.data.Data):
             "virials": virials,
             "dipole": dipole,
             "charges": charges,
+            "total_charge": total_charge,
         }
         super().__init__(**data)
 
@@ -189,6 +193,7 @@ class AtomicData(torch_geometric.data.Data):
             if config.charges is not None
             else None
         )
+        total_charge = torch.sum(charges) if charges is not None else None
 
         return cls(
             edge_index=torch.tensor(edge_index, dtype=torch.long),
@@ -208,6 +213,7 @@ class AtomicData(torch_geometric.data.Data):
             virials=virials,
             dipole=dipole,
             charges=charges,
+            total_charge=total_charge,
         )
 
 

@@ -5,8 +5,9 @@
 ###########################################################################################
 
 from functools import partial
+import time
 from turtle import pos
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import ase
 import numpy as np
@@ -255,71 +256,40 @@ def compute_fixed_charge_dipole(
     )  # [N_graphs,3]
 
 
-def compute_atomic_charges(
-    hardness: torch.Tensor,
-    electronegativity: torch.Tensor,
-    positions: torch.Tensor,
-    total_charge: int,
-    atomic_numbers: torch.Tensor,
-) -> torch.Tensor:
-    """Use charge equilibration approach to solve linear system of equations and return atomic charges.
-    Uses lagrange multipliers to ensure sum of charges equals total charge on the system"""
-    # get covalent radii from ase
-    # set default device to cuda
-    # torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
-    # E_Qeq = E_elec + \Sigma \chi_i q_i + 0.5 J_i q_i^2
-    # matrix of coefficients
-    A = torch.zeros((len(electronegativity), len(electronegativity)), device=positions.device)
-    #
-    b = torch.zeros((len(electronegativity), 1), device=positions.device)
-    sqrt_pi = torch.sqrt(torch.tensor(torch.pi, device= positions.device))
-
-    # compute the A_ij entries
-    for i in range(len(electronegativity)):
-        for j in range(len(electronegativity)):
-            if i == j:
-                A[i, j] = hardness[i] + (
-                    1 / sqrt_pi * covalent_radii[atomic_numbers[i]]
-                )
-            else:
-                # compute the distance between atoms i and j
-                r_ij = torch.linalg.norm(positions[i] - positions[j])
-                # rms of the covalent radii
-                gamma_ij = torch.sqrt(
-                    torch.tensor(
-                        covalent_radii[atomic_numbers[i]] ** 2
-                        + covalent_radii[atomic_numbers[j]] ** 2
-                    )
-                )
-                # error function
-                A[i, j] = (
-                    torch.erf(
-                        r_ij / (torch.sqrt(torch.tensor(2, device=positions.device))) * gamma_ij
-                    )
-                    / r_ij
-                )
-
-    # solve the linear system of equations using to constraint that the sum of the charges is equal to the total charge with lagrange multipliers
-    A = torch.cat((A, torch.ones((len(electronegativity), 1), device=positions.device)), dim=1)
-    A = torch.cat((A, torch.ones((1, len(electronegativity) + 1), device=positions.device)), dim=0)
-    b = torch.cat((b, torch.tensor([[total_charge]], device=positions.device)), dim=0)
-    print("solve the linear system of equations...")
-    x = torch.linalg.solve(A, b)
-    print("solved!")
-    # return the charges
-    print("charges are", x[:-1])
-    return x[:-1].squeeze()
 
 
 def compute_coulomb_energy(
-    partial_charges: torch.Tensor, positions: torch.Tensor
+    partial_charges: torch.Tensor, data: Dict[str, torch.Tensor]
 ) -> torch.Tensor:
     """Compute the coulomb energy of a system of partial charges"""
     # compute the pairwise distances
     # compute the distances, accounting for pbc
-    distances = torch.cdist(positions, positions)
-    # compute the coulomb energy
-    potential = torch.triu(partial_charges * partial_charges / distances, diagonal=1)
-    coulomb_energy = 0.5 * torch.sum(potential)
-    return coulomb_energy
+    posn = data["positions"]
+    batch_indices = data["batch"]
+
+    output_energies = []
+    vac_permitivity = 55.26349406e-4 # eps_0 in [e^2 / (eV * Angstrom)]
+    coulomb_constant = torch.tensor(1 / (4 * torch.pi * vac_permitivity))
+
+    for idx in torch.unique(batch_indices):
+        # get the positions of the atoms in the current molecule
+        molecule_mask = batch_indices == idx
+        positions = posn[molecule_mask]
+        molecule_partial_charges = partial_charges[molecule_mask]
+
+
+        # iterate over each molecule in the batch
+
+        distances = torch.cdist(positions, positions)
+        # put ones on the diagonal to avoid dividing by zero
+        distances = distances + torch.eye(distances.shape[0], device=distances.device)
+        # compute the coulomb energy
+        potential = torch.outer(molecule_partial_charges, molecule_partial_charges) / distances
+
+        potential = torch.triu(potential, diagonal=1)
+        coulomb_energy = coulomb_constant * torch.sum(potential)
+        output_energies.append(coulomb_energy)
+
+    output_energies = torch.stack(output_energies) # [n_graphs]
+    return output_energies
