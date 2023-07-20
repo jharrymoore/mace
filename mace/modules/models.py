@@ -71,6 +71,8 @@ class MACE(torch.nn.Module):
             "num_elements", torch.tensor(num_elements, dtype=torch.int64)
         )
         self.hidden_irreps = hidden_irreps
+        self.MLP_irreps = MLP_irreps
+        self.gate = gate
         # Embedding
         node_attr_irreps = o3.Irreps([(num_elements, (0, 1))])
         node_feats_irreps = o3.Irreps([(hidden_irreps.count(o3.Irrep(0, 1)), (0, 1))])
@@ -387,6 +389,25 @@ class QEqMACE(MACE):
         # initialize hardless tensor to random values
     
         # electronetavitity block
+        self.enegs = torch.nn.ModuleList()
+        self.enegs.append(LinearReadoutBlock(self.hidden_irreps))
+        for i in range(self.num_interactions-1):
+            if i == self.num_interactions - 2:
+                hidden_irreps_out = str(
+                    self.hidden_irreps[0]
+                )  # Select only scalars for last layer
+            else:
+                hidden_irreps_out = self.hidden_irreps
+            if i == self.num_interactions - 2:
+                    self.enegs.append(
+                        NonLinearReadoutBlock(hidden_irreps_out, self.MLP_irreps, self.gate)
+                    )
+            else:
+            
+                self.enegs.append(LinearReadoutBlock(self.hidden_irreps))
+
+
+
         self.eneg = LinearReadoutBlock(self.hidden_irreps)
         self.charge_equil = ChargeEquilibrationBlock(num_elements=self.num_elements)
 
@@ -440,8 +461,9 @@ class QEqMACE(MACE):
 
         # Interactions
         node_es_list = []
-        for interaction, product, readout in zip(
-            self.interactions, self.products, self.readouts
+        node_eneg_list = []
+        for interaction, product, readout, eneg in zip(
+            self.interactions, self.products, self.readouts, self.enegs
         ):
             node_feats, sc = interaction(
                 node_attrs=data["node_attrs"],
@@ -454,9 +476,13 @@ class QEqMACE(MACE):
                 node_feats=node_feats, sc=sc, node_attrs=data["node_attrs"]
             )
             node_es_list.append(readout(node_feats).squeeze(-1))  # {[n_nodes, ], }
+            node_eneg_list.append(eneg(node_feats).squeeze(-1))
 
         # with the final set of node features, predict the electronegativities using a charge equilibration scheme
-        node_eneg = self.eneg(node_feats)
+        # node_eneg = self.eneg(node_feats)
+        node_eneg = torch.sum(
+            torch.stack(node_eneg_list, dim=0), dim=0
+        ).unsqueeze(-1)
 
         # get the atomic numbers from one hot encoding
         atomic_num_indices = torch.argmax(data["node_attrs"], dim=1)

@@ -46,6 +46,8 @@ class LinearReadoutBlock(torch.nn.Module):
         self.linear = o3.Linear(irreps_in=irreps_in, irreps_out=o3.Irreps("0e"))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:  # [n_nodes, irreps]  # [..., ]
+        # print("feature shape to linear", x.shape)
+        # print the irreps in
         return self.linear(x)  # [n_nodes, 1]
 
 

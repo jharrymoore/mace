@@ -132,12 +132,11 @@ def train(
                     f"Epoch {epoch}: loss={valid_loss:.4f}, RMSE_E_per_atom={error_e:.1f} meV, RMSE_F={error_f:.1f} meV / A"
                 )
             elif log_errors == "PerAtomRMSEcharges":
-                print(eval_metrics)
                 error_e = eval_metrics["rmse_e_per_atom"] * 1e3
                 error_f = eval_metrics["rmse_f"] * 1e3
-                error_c = eval_metrics["charges_rmse"]
+                error_c = eval_metrics["rmse_charges"] * 1e3
                 logging.info(
-                    f"Epoch {epoch}: loss={valid_loss:.4f}, RMSE_E_per_atom={error_e:.1f} meV, RMSE_F={error_f:.1f} meV / A, RMSE_charges={error_c:.1f} e"
+                    f"Epoch {epoch}: loss={valid_loss:.4f}, RMSE_E_per_atom={error_e:.1f} meV, RMSE_F={error_f:.1f} meV / A, RMSE_charges={error_c:.1f} me"
                 )
             elif (
                 log_errors == "PerAtomRMSEstressvirials"
@@ -294,6 +293,9 @@ def evaluate(
     delta_mus_list = []
     delta_mus_per_atom_list = []
     mus_list = []
+    charges_computed = False
+    delta_charges_list = []
+    charges_list = []
     batch = None  # for pylint
 
     start_time = time.time()
@@ -337,6 +339,10 @@ def evaluate(
                 (batch.virials - output["virials"])
                 / (batch.ptr[1:] - batch.ptr[:-1]).view(-1, 1, 1)
             )
+        if output.get("charges") is not None and batch.charges is not None:
+            charges_computed = True
+            delta_charges_list.append(batch.charges - output["charges"])
+            charges_list.append(batch.charges)
         if output.get("dipole") is not None and batch.dipole is not None:
             Mus_computed = True
             delta_mus_list.append(batch.dipole - output["dipole"])
@@ -393,6 +399,17 @@ def evaluate(
         aux["rmse_mu_per_atom"] = compute_rmse(delta_mus_per_atom)
         aux["rel_rmse_mu"] = compute_rel_rmse(delta_mus, mus)
         aux["q95_mu"] = compute_q95(delta_mus)
+    if charges_computed:
+        delta_charges = to_numpy(torch.cat(delta_charges_list, dim=0))
+        charges = to_numpy(torch.cat(charges_list, dim=0))
+        aux["mae_f"] = compute_mae(delta_charges)
+        aux["rel_mae_charges"] = compute_rel_mae(delta_charges, charges)
+        aux["rmse_charges"] = compute_rmse(delta_charges)
+        aux["rel_rmse_charges"] = compute_rel_rmse(delta_charges, charges)
+        aux["q95_charges"] = compute_q95(delta_charges)
+
+
+
 
     aux["time"] = time.time() - start_time
 
