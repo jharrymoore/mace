@@ -685,50 +685,32 @@ class ChargeEquilibrationBlock(torch.nn.Module):
             diag_vals = hardness_vals + (         
                             1 / (sqrt_pi * cov_radii[mol_atomic_numbers])
                         )
-
-            A = torch.zeros((n_atoms, n_atoms), device=positions.device)
-            # fill in primary diagonal
-            A[torch.arange(n_atoms), torch.arange(n_atoms)] = diag_vals
-
-
             # compute distances between each pair of atoms
             distances = torch.cdist(mol_positions, mol_positions)
-            # compute the gamma tensor for the whole molecule
-            
-            # create the gamma tensor without looping
-            gamma_square = torch.zeros_like(A)
-            # fill in diagonal
-            gamma_square[torch.arange(n_atoms), torch.arange(n_atoms)] = torch.square(cov_radii[mol_atomic_numbers])
-
             sigma = torch.square(cov_radii[mol_atomic_numbers]).view(-1,1)
-            # square each element of sigma
-
-            gamma = sigma + sigma.t()
-
-            # square each element of gamma
-            gamma_square = torch.sqrt(gamma)            
-            
-            gamma = torch.sqrt(gamma_square)
-
+            gamma = torch.sqrt(sigma + sigma.t())
             A = torch.erf(distances / (sqrt_2 * gamma)) / distances
-            # fill in the diagonal
             A[torch.arange(n_atoms), torch.arange(n_atoms)] = diag_vals
-
             # solve the linear system of equations using to constraint that the sum of the charges is equal to the total charge with lagrange multipliers
             A = torch.cat((A, torch.ones((n_atoms, 1), device=positions.device)), dim=1)
             A = torch.cat(
                 (A, torch.ones((1, n_atoms + 1), device=positions.device)), dim=0
             )
 
-            b = eneg[molecule_indices]
+            b = -1 * eneg[molecule_indices]
             b = torch.cat((b, torch.tensor([[total_charge]], device=positions.device)), dim=0)
 
         
             x = torch.linalg.solve(A, b)
             x = x[:-1].squeeze()
             output_partial_charges.append(x)
+            # print(x)
+            # check sum of charges is equal to total charge
+            # print(float(torch.sum(x)), float(total_charge))
+
 
             # check sum of charges is equal to total charge
+            # print(float(torch.sum(x)), float(total_charge))
 
         # check the sum along the atom axiz is equal to the total charge
         # print(torch.sum(output_partial_charges, dim=1))
