@@ -6,6 +6,7 @@ __pycache__/
 # Distribution / packaging
 build/
 *.egg-info/
+experiments/
 
 # pytest
 .pytest_cache/
@@ -18,3 +19,8 @@ build/
 .vscode/
 logs/MACE_run-5.log
 *.txt
+slurm*.out
+experiments/
+*.sh
+md_test/
+logs/
