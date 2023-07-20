@@ -43,6 +43,12 @@ def parse_args() -> argparse.Namespace:
         default=False,
     )
     parser.add_argument(
+        "--compute_charges",
+        help="compute charges",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
         "--return_contributions",
         help="model outputs energy contributions for each body order, only suppported for MACE, not ScaleShiftMACE",
         action="store_true",
@@ -90,14 +96,18 @@ def main():
     contributions_list = []
     stresses_list = []
     forces_collection = []
+    charges_list = []
 
     for batch in data_loader:
         print(batch)
         batch = batch.to(device)
         output = model(batch.to_dict(), compute_stress=args.compute_stress)
+        print(output.keys())
         energies_list.append(torch_tools.to_numpy(output["energy"]))
         if args.compute_stress:
             stresses_list.append(torch_tools.to_numpy(output["stress"]))
+        if args.compute_charges:
+            charges_list.append(torch_tools.to_numpy(output["charges"]))
 
         if args.return_contributions:
             contributions_list.append(torch_tools.to_numpy(output["contributions"]))
@@ -130,6 +140,8 @@ def main():
 
         if args.compute_stress:
             atoms.info[args.info_prefix + "stress"] = stresses[i]
+        if args.compute_charges:
+            atoms.arrays[args.info_prefix + "charges"] = charges_list[i]
 
         if args.return_contributions:
             atoms.info[args.info_prefix + "BO_contributions"] = contributions[i]
