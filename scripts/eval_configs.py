@@ -99,10 +99,8 @@ def main():
     charges_list = []
 
     for batch in data_loader:
-        print(batch)
         batch = batch.to(device)
         output = model(batch.to_dict(), compute_stress=args.compute_stress)
-        print(output.keys())
         energies_list.append(torch_tools.to_numpy(output["energy"]))
         if args.compute_stress:
             stresses_list.append(torch_tools.to_numpy(output["stress"]))
