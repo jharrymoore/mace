@@ -256,9 +256,6 @@ def compute_fixed_charge_dipole(
     )  # [N_graphs,3]
 
 
-
-
-
 def compute_coulomb_energy(
     partial_charges: torch.Tensor, data: Dict[str, torch.Tensor]
 ) -> torch.Tensor:
@@ -269,7 +266,7 @@ def compute_coulomb_energy(
     batch_indices = data["batch"]
 
     output_energies = []
-    vac_permitivity = 55.26349406e-4 # eps_0 in [e^2 / (eV * Angstrom)]
+    vac_permitivity = 55.26349406e-4  # eps_0 in [e^2 / (eV * Angstrom)]
     coulomb_constant = torch.tensor(1 / (4 * torch.pi * vac_permitivity))
 
     for idx in torch.unique(batch_indices):
@@ -278,18 +275,19 @@ def compute_coulomb_energy(
         positions = posn[molecule_mask]
         molecule_partial_charges = partial_charges[molecule_mask]
 
-
         # iterate over each molecule in the batch
 
         distances = torch.cdist(positions, positions)
         # put ones on the diagonal to avoid dividing by zero
         distances = distances + torch.eye(distances.shape[0], device=distances.device)
         # compute the coulomb energy
-        potential = torch.outer(molecule_partial_charges, molecule_partial_charges) / distances
+        potential = (
+            torch.outer(molecule_partial_charges, molecule_partial_charges) / distances
+        )
 
         potential = torch.triu(potential, diagonal=1)
         coulomb_energy = coulomb_constant * torch.sum(potential)
         output_energies.append(coulomb_energy)
 
-    output_energies = torch.stack(output_energies) # [n_graphs]
+    output_energies = torch.stack(output_energies)  # [n_graphs]
     return output_energies

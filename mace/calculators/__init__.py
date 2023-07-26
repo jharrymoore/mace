@@ -4,7 +4,7 @@ from .mace import (
     EnergyDipoleMACECalculator,
     MACECalculator,
     MACEFEPCalculator,
-    MACEQEqCalculator
+    MACEQEqCalculator,
 )
 
 __all__ = [

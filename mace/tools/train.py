@@ -408,9 +408,6 @@ def evaluate(
         aux["rel_rmse_charges"] = compute_rel_rmse(delta_charges, charges)
         aux["q95_charges"] = compute_q95(delta_charges)
 
-
-
-
     aux["time"] = time.time() - start_time
 
     return avg_loss, aux

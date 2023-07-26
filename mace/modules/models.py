@@ -65,7 +65,9 @@ class MACE(torch.nn.Module):
         self.register_buffer(
             "atomic_numbers", torch.tensor(atomic_numbers, dtype=torch.int64)
         )
-        self.register_buffer("r_max", torch.tensor(r_max, dtype=torch.get_default_dtype()))
+        self.register_buffer(
+            "r_max", torch.tensor(r_max, dtype=torch.get_default_dtype())
+        )
         self.register_buffer(
             "num_interactions", torch.tensor(num_interactions, dtype=torch.int64)
         )
@@ -389,11 +391,11 @@ class QEqMACE(MACE):
         )
         # define the element-dependent hardness tensor, this is trainable
         # initialize hardless tensor to random values
-    
+
         # electronetavitity block
         self.enegs = torch.nn.ModuleList()
         self.enegs.append(LinearReadoutBlock(self.hidden_irreps))
-        for i in range(self.num_interactions-1):
+        for i in range(self.num_interactions - 1):
             if i == self.num_interactions - 2:
                 hidden_irreps_out = str(
                     self.hidden_irreps[0]
@@ -401,14 +403,11 @@ class QEqMACE(MACE):
             else:
                 hidden_irreps_out = self.hidden_irreps
             if i == self.num_interactions - 2:
-                    self.enegs.append(
-                        NonLinearReadoutBlock(hidden_irreps_out, self.MLP_irreps, self.gate)
-                    )
+                self.enegs.append(
+                    NonLinearReadoutBlock(hidden_irreps_out, self.MLP_irreps, self.gate)
+                )
             else:
-            
                 self.enegs.append(LinearReadoutBlock(self.hidden_irreps))
-
-
 
         self.eneg = LinearReadoutBlock(self.hidden_irreps)
         self.charge_equil = ChargeEquilibrationBlock(num_elements=self.num_elements)
@@ -482,36 +481,32 @@ class QEqMACE(MACE):
 
         # with the final set of node features, predict the electronegativities using a charge equilibration scheme
         # node_eneg = self.eneg(node_feats)
-        node_eneg = torch.sum(
-            torch.stack(node_eneg_list, dim=0), dim=0
-        ).unsqueeze(-1)
+        node_eneg = torch.sum(torch.stack(node_eneg_list, dim=0), dim=0).unsqueeze(-1)
 
         # get the atomic numbers from one hot encoding
         atomic_num_indices = torch.argmax(data["node_attrs"], dim=1)
         atomic_numbers = self.atomic_numbers[atomic_num_indices]
 
-        node_partial_charges = self.charge_equil(
-             node_eneg, data, atomic_numbers
-        )
+        node_partial_charges = self.charge_equil(node_eneg, data, atomic_numbers)
         # now compute the electrostatic contribution to the energy using regular n^2 summation
         coulomb_energy = compute_coulomb_energy(
             node_partial_charges,
             data,
         )
         # print("coulomb energy", coulomb_energy)
-        # detach the coulomb energy from the graph so we don't backprop through it, we want to fit the local model features i.e. the energy readout of the mace model using the energy contribution, with the coulomb energy a static contribution, 
+        # detach the coulomb energy from the graph so we don't backprop through it, we want to fit the local model features i.e. the energy readout of the mace model using the energy contribution, with the coulomb energy a static contribution,
 
         # compute the overall dipole moment due to the partial charges
 
-        batch_dipoles = compute_fixed_charge_dipole(node_partial_charges, data["positions"], data["batch"], num_graphs)
+        batch_dipoles = compute_fixed_charge_dipole(
+            node_partial_charges, data["positions"], data["batch"], num_graphs
+        )
 
         # print(batch_dipoles, batch_dipoles.shape)
-
 
         coulomb_energy = coulomb_energy.detach()
         # still require grad to compute the forces
         coulomb_energy.requires_grad_(True)
-
 
         # Sum over interactions
         node_inter_es = torch.sum(
@@ -524,12 +519,12 @@ class QEqMACE(MACE):
             src=node_inter_es, index=data["batch"], dim=-1, dim_size=num_graphs
         )  # [n_graphs,]'
         # Add E_0 and (scaled) interaction energy and coulomb energy
-        total_energy = e0 + inter_e + coulomb_energy    
+        total_energy = e0 + inter_e + coulomb_energy
         node_energy = node_e0 + node_inter_es
 
         # check the hardness tensor
         forces, virials, stress = get_outputs(
-            energy=inter_e  + coulomb_energy,
+            energy=inter_e + coulomb_energy,
             positions=data["positions"],
             displacement=displacement,
             cell=data["cell"],
@@ -544,7 +539,7 @@ class QEqMACE(MACE):
             "energy": total_energy,
             "node_energy": node_energy,
             "interaction_energy": inter_e,
-            "forces": forces ,
+            "forces": forces,
             "virials": virials,
             "dipole": batch_dipoles,
             "stress": stress,
@@ -554,12 +549,14 @@ class QEqMACE(MACE):
 
         return output
 
+
 @compile_mode("script")
 class SQEqMACE(MACE):
     """SPlit charge qeq mace model, with local charge transfer enforced by topology
 
     :param _type_ MACE: _description_
     """
+
     def __init__(
         self,
         atomic_inter_scale: float,
@@ -572,11 +569,11 @@ class SQEqMACE(MACE):
         )
         # define the element-dependent hardness tensor, this is trainable
         # initialize hardless tensor to random values
-    
+
         # electronetavitity block
         self.enegs = torch.nn.ModuleList()
         self.enegs.append(LinearReadoutBlock(self.hidden_irreps))
-        for i in range(self.num_interactions-1):
+        for i in range(self.num_interactions - 1):
             if i == self.num_interactions - 2:
                 hidden_irreps_out = str(
                     self.hidden_irreps[0]
@@ -584,14 +581,11 @@ class SQEqMACE(MACE):
             else:
                 hidden_irreps_out = self.hidden_irreps
             if i == self.num_interactions - 2:
-                    self.enegs.append(
-                        NonLinearReadoutBlock(hidden_irreps_out, self.MLP_irreps, self.gate)
-                    )
+                self.enegs.append(
+                    NonLinearReadoutBlock(hidden_irreps_out, self.MLP_irreps, self.gate)
+                )
             else:
-            
                 self.enegs.append(LinearReadoutBlock(self.hidden_irreps))
-
-
 
         self.eneg = LinearReadoutBlock(self.hidden_irreps)
         # self.charge_equil = ChargeEquilibrationBlock(num_elements=self.num_elements)
@@ -668,72 +662,59 @@ class SQEqMACE(MACE):
 
         # with the final set of node features, predict the electronegativities using a charge equilibration scheme
         # node_eneg = self.eneg(node_feats)
-        node_eneg = torch.sum(
-            torch.stack(node_eneg_list, dim=0), dim=0
-        ).unsqueeze(-1)
+        node_eneg = torch.sum(torch.stack(node_eneg_list, dim=0), dim=0).unsqueeze(-1)
         # instead of node enegs, we compute the bond polarisation as the linear combination of the node enegs for connected bonds
         # get the bond polarisation
-        bond_polarisation = torch.zeros_like(data["edge_index"][0], dtype=torch.get_default_dtype())
+        bond_polarisation = torch.zeros_like(
+            data["edge_index"][0], dtype=torch.get_default_dtype()
+        )
 
         # loop over the edge indices, make linear combinations of the node enegs
-        for i, (node1, node2) in enumerate(zip(data["edge_index"][0], data["edge_index"][1])):
+        for i, (node1, node2) in enumerate(
+            zip(data["edge_index"][0], data["edge_index"][1])
+        ):
             bond_polarisation[i] = node_eneg[node1] + node_eneg[node2]
 
         # zero matrix of n_atoms, n_bonds
-        T = torch.zeros((data["node_attrs"].shape[0], data["edge_index"].shape[1]), dtype=torch.get_default_dtype())
+        T = torch.zeros(
+            (data["node_attrs"].shape[0], data["edge_index"].shape[1]),
+            dtype=torch.get_default_dtype(),
+        )
 
         senders, receivers = data["edge_index"]
-
-        # no self edges here
-        self_edges = senders == receivers
-        senders = senders[~self_edges]
-        receivers = receivers[~self_edges]
-
-
-        senders = data["edge_index"][0]
         sender_idx = range(senders.shape[0])
-        receivers = data["edge_index"][1]
         receiver_idx = range(receivers.shape[0])
 
-        # vectorised implementation of the above loop
-        T = torch.zeros((data["node_attrs"].shape[0], data["edge_index"].shape[1]), dtype=torch.get_default_dtype())
         T[senders, sender_idx] = 1
         T[receivers, receiver_idx] = -1
-
-
-        # T is shape [n_atoms,n_bonds]
-
-
+        # so here we index the atom in question, and the index of the bond in question, that is all we need
 
         # get the atomic numbers from one hot encoding
         atomic_num_indices = torch.argmax(data["node_attrs"], dim=1)
         atomic_numbers = self.atomic_numbers[atomic_num_indices]
-
         node_partial_charges = self.charge_equil(
-            T=T,
-            p=bond_polarisation,
-            data=data,
-            atomic_numbers=atomic_numbers
+            T=T,eneg=node_eneg, p=bond_polarisation, data=data, atomic_numbers=atomic_numbers
         )
+
         # now compute the electrostatic contribution to the energy using regular n^2 summation
         coulomb_energy = compute_coulomb_energy(
             node_partial_charges,
             data,
         )
         # print("coulomb energy", coulomb_energy)
-        # detach the coulomb energy from the graph so we don't backprop through it, we want to fit the local model features i.e. the energy readout of the mace model using the energy contribution, with the coulomb energy a static contribution, 
+        # detach the coulomb energy from the graph so we don't backprop through it, we want to fit the local model features i.e. the energy readout of the mace model using the energy contribution, with the coulomb energy a static contribution,
 
         # compute the overall dipole moment due to the partial charges
 
-        batch_dipoles = compute_fixed_charge_dipole(node_partial_charges, data["positions"], data["batch"], num_graphs)
+        batch_dipoles = compute_fixed_charge_dipole(
+            node_partial_charges, data["positions"], data["batch"], num_graphs
+        )
 
         # print(batch_dipoles, batch_dipoles.shape)
-
 
         coulomb_energy = coulomb_energy.detach()
         # still require grad to compute the forces
         coulomb_energy.requires_grad_(True)
-
 
         # Sum over interactions
         node_inter_es = torch.sum(
@@ -746,12 +727,12 @@ class SQEqMACE(MACE):
             src=node_inter_es, index=data["batch"], dim=-1, dim_size=num_graphs
         )  # [n_graphs,]'
         # Add E_0 and (scaled) interaction energy and coulomb energy
-        total_energy = e0 + inter_e + coulomb_energy    
+        total_energy = e0 + inter_e + coulomb_energy
         node_energy = node_e0 + node_inter_es
 
         # check the hardness tensor
         forces, virials, stress = get_outputs(
-            energy=inter_e  + coulomb_energy,
+            energy=inter_e + coulomb_energy,
             positions=data["positions"],
             displacement=displacement,
             cell=data["cell"],
@@ -766,7 +747,7 @@ class SQEqMACE(MACE):
             "energy": total_energy,
             "node_energy": node_energy,
             "interaction_energy": inter_e,
-            "forces": forces ,
+            "forces": forces,
             "virials": virials,
             "dipole": batch_dipoles,
             "stress": stress,
@@ -1369,5 +1350,3 @@ class EnergyDipolesMACE(torch.nn.Module):
         }
 
         return output
-
-

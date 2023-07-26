@@ -31,7 +31,7 @@ from .loss import (
     WeightedEnergyForcesVirialsLoss,
     WeightedForcesLoss,
     WeightedEnergyForcesChargesLoss,
-    WeightedEnergyForcesDipolesChargesLoss
+    WeightedEnergyForcesDipolesChargesLoss,
 )
 from .models import (
     MACE,

@@ -189,7 +189,6 @@ def main() -> None:
             forces_weight=args.forces_weight,
             dipole_weight=args.dipole_weight,
             charges_weight=args.charges_weight,
-            
         )
     else:
         loss_fn = modules.EnergyForcesLoss(
@@ -392,24 +391,25 @@ def main() -> None:
                 "params": model.readouts.parameters(),
                 "weight_decay": 0.0,
             },
-            
         ],
         lr=args.lr,
         amsgrad=args.amsgrad,
     )
     if args.loss in ("energy_forces_charges", "energy_forces_charges_dipole"):
-        param_options["params"].extend([
-            {
-                "name": "eneg",
-                "params": model.eneg.parameters(),
-                "weight_decay": 0.0, 
-            },
-            {
-                "name": "charge_equil",
-                "params": model.charge_equil.parameters(),
-                "weight_decay": 0.0,
-            }
-        ])
+        param_options["params"].extend(
+            [
+                {
+                    "name": "eneg",
+                    "params": model.eneg.parameters(),
+                    "weight_decay": 0.0,
+                },
+                {
+                    "name": "charge_equil",
+                    "params": model.charge_equil.parameters(),
+                    "weight_decay": 0.0,
+                },
+            ]
+        )
 
     optimizer: torch.optim.Optimizer
     if args.optimizer == "adamw":

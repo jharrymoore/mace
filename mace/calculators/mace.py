@@ -256,13 +256,9 @@ class EnergyDipoleMACECalculator(Calculator):
                 stress * (self.energy_units_to_eV / self.length_units_to_A**3)
             )[0]
 
+
 class MACEQEqCalculator(Calculator):
-    implemented_properties = [
-        "energy",
-        "free_energy",
-        "forces",
-        "charges"
-    ]
+    implemented_properties = ["energy", "free_energy", "forces", "charges"]
 
     def __init__(
         self,
@@ -408,7 +404,6 @@ class MACEFEPCalculator(Calculator):
         ]
 
         for idx, at in enumerate(all_atoms):
-
             # call to base-class to set atoms attribute
             Calculator.calculate(self, at)
 
