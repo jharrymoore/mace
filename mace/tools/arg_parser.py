@@ -84,6 +84,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "AtomicDipolesMACE",
             "EnergyDipolesMACE",
             "QEqMACE",
+            "SQEqMACE",
         ],
     )
     parser.add_argument(

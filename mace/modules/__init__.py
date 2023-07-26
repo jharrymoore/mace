@@ -19,6 +19,7 @@ from .blocks import (
     ResidualElementDependentInteractionBlock,
     ScaleShiftBlock,
     ChargeEquilibrationBlock,
+    SplitChargeEquilibrationBlock,
     LinearElectronegativityReadoutBlock,
 )
 from .loss import (
@@ -40,6 +41,7 @@ from .models import (
     ScaleShiftBOTNet,
     ScaleShiftMACE,
     QEqMACE,
+    SQEqMACE,
 )
 from .radial import BesselBasis, PolynomialCutoff
 from .symmetric_contraction import SymmetricContraction

@@ -80,6 +80,8 @@ def weighted_mean_squared_error_dipole(ref: Batch, pred: TensorDict) -> torch.Te
 def weighted_mean_squared_error_charge(ref: Batch, pred: TensorDict) -> torch.Tensor:
     # charges: [n_graphs, ]
     num_atoms = (ref.ptr[1:] - ref.ptr[:-1]).unsqueeze(-1)  # [n_graphs,1]
+    # print(ref["charges"])
+    # print(pred["charges"])
     return torch.mean(
         torch.square((ref["charges"] - pred["charges"]) / num_atoms)
     )  # []

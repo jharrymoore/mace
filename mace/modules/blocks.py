@@ -5,6 +5,7 @@
 ###########################################################################################
 
 from abc import abstractmethod
+from multiprocessing import Value
 from typing import Callable, Dict, Optional, Tuple, Union
 import time
 
@@ -717,3 +718,136 @@ class ChargeEquilibrationBlock(torch.nn.Module):
         # check the sum along the atom axiz is equal to the total charge
         # print(torch.sum(output_partial_charges, dim=1))
         return torch.cat(output_partial_charges, dim=0)
+
+
+
+@compile_mode("script")
+class SplitChargeEquilibrationBlock(torch.nn.Module):
+    def __init__(self, num_elements: int, r_cut: int = 5):
+        super().__init__()
+
+        self.hardness = torch.nn.Parameter(
+            torch.rand(
+                num_elements,
+            )
+        )
+        self.r_cut = torch.tensor(r_cut)
+
+    def forward(self, T: torch.tensor, p: torch.tensor, data: Dict[str, torch.tensor], atomic_numbers: torch.tensor):
+
+        # here we solve the linear system for each molecule in the batch.
+        device = p.device
+        sqrt_pi = torch.sqrt(torch.tensor(torch.pi, device=device))
+        sqrt_2 = torch.sqrt(torch.tensor(2, device=device))
+
+        # count the number of unique entries in batch
+        positions = data['positions']
+        all_distances = torch.cdist(positions, positions)
+        batch_indices = data['batch']
+        unique_batch_indices = torch.unique(batch_indices)
+        # atomic numbers is an unrolled list of atomic numbers for each molecule
+        cov_radii = torch.tensor(covalent_radii, device=device)
+
+        output_partial_charges = []
+        for batch_index in unique_batch_indices:
+            molecule_indices = torch.where(batch_indices == batch_index)
+            mol_positions = positions[molecule_indices]
+            n_atoms = len(mol_positions)
+            total_charge = data["total_charge"][batch_index]
+            mol_atomic_numbers = atomic_numbers[molecule_indices]
+            # slice the edge_index list to get the edges corresponding to this molecule
+
+            # get edges corresponding to this molecule 
+            molecule_edge_indices = torch.where((T[molecule_indices] != 0).any(dim=0))[0]
+
+            # slice edge_indices
+            mol_edge_indices = data["edge_index"][:, molecule_edge_indices]
+            n_mol_edges = mol_edge_indices.shape[1]
+
+
+            T_mol = T[molecule_indices][:, molecule_edge_indices]
+            # print(T_mol.shape)
+
+
+
+            atomic_indices = torch.argmax(data["node_attrs"][molecule_indices], dim=1)
+            hardness_vals = self.hardness[atomic_indices]
+            diag_vals = hardness_vals + (         
+                            1 / (sqrt_pi * cov_radii[mol_atomic_numbers])
+                        )
+            # compute distances between each pair of atoms
+            distances = torch.cdist(mol_positions, mol_positions)
+            # now get a vector of bond lengths for each edge in the molecule by indexing the distances matrix with the edge indices
+            edge_lengths = all_distances[mol_edge_indices[0], mol_edge_indices[1]]
+
+            # construct the A matrix in a similar way to above, instead of (H+J) we have the T matrix in there, and the C matrix as we
+            A = torch.zeros((n_atoms, n_atoms), device=positions.device)
+
+            sigma = torch.square(cov_radii[mol_atomic_numbers]).view(-1,1)
+            gamma = torch.sqrt(sigma + sigma.t())
+
+            # this is the H+J part
+            A = torch.erf(distances / (sqrt_2 * gamma)) / distances
+            A[torch.arange(n_atoms), torch.arange(n_atoms)] = diag_vals
+
+            A = T_mol.t() @ A @ T_mol
+
+            # add the C matrix, size of C is the same as T
+            C = torch.zeros((n_mol_edges, n_mol_edges))
+            # fill in the digonals with 
+            # delta_uv means we have a diagonal element only
+            def cutoff(r_uv: float):
+                return torch.cos(torch.pi * r_uv / (2 * self.r_cut))**-1
+
+            
+            # apply cutoff to the diagonal elements of C
+            C[torch.arange(n_mol_edges), torch.arange(n_mol_edges)] = torch.tensor([cutoff(r_uv) for r_uv in edge_lengths])
+
+
+            A += C
+
+
+
+            # now set up the linear system
+            A = torch.cat((A, torch.ones((n_mol_edges, 1), device=positions.device)), dim=1)
+            A = torch.cat(
+                (A, torch.ones((1, n_mol_edges + 1), device=positions.device)), dim=0
+            )
+
+            b = -1 * p[molecule_edge_indices]
+            b = torch.cat((b, torch.tensor([total_charge], device=positions.device)), dim=0)
+
+            # solve the linear system, but because there are many small eigenvectors, do an SVD first to get the pseudo-inverse, then filter the small eigenvectors
+            U, S, V = torch.linalg.svd(A)
+            # print(S)
+
+            # filter out the small eigenvalues
+            S = torch.where(S > 1e-5, S, torch.zeros_like(S))
+
+            # use the pseudo-inverse to solve the linear system
+            x = V @ torch.diag(1 / S) @ U.t() @ b
+            x = x[:-1].squeeze()
+
+            # x should be the same size as the number of edges
+            # multiply bu T to get the partial charges
+            x = T_mol @ x
+
+
+
+            output_partial_charges.append(x)
+
+        return torch.cat(output_partial_charges, dim=0)
+
+
+
+
+            
+
+
+
+
+
+
+            
+
+
