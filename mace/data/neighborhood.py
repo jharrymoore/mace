@@ -15,7 +15,8 @@ def get_neighborhood(
     cutoff: float,
     pbc: Optional[Tuple[bool, bool, bool]] = None,
     cell: Optional[np.ndarray] = None,  # [3, 3]
-    true_self_interaction=False,
+    true_self_interaction=True,
+    max_n_neighbours: Optional[int] = 1000,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     if pbc is None:
         pbc = (False, False, False)
@@ -35,6 +36,11 @@ def get_neighborhood(
         self_interaction=True,  # we want edges from atom to itself in different periodic images
         use_scaled_positions=False,  # positions are not scaled positions
     )
+    if max_n_neighbours is not None:
+        # pad sender and receiver with -1 up to max_n_neighbours
+        sender = np.pad(sender, (0, max_n_neighbours - len(sender)), constant_values=0)
+        receiver = np.pad(receiver, (0, max_n_neighbours - len(receiver)), constant_values=0)
+        unit_shifts = np.pad(unit_shifts, ((0, max_n_neighbours - len(unit_shifts)), (0, 0)), constant_values=0)
 
     if not true_self_interaction:
         # Eliminate self-edges that don't cross periodic boundaries

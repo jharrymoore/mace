@@ -11,6 +11,7 @@ from ase.stress import full_3x3_to_voigt_6_stress
 
 from mace import data
 from mace.tools import torch_geometric, torch_tools, utils
+import time
 
 
 class MACECalculator(Calculator):
@@ -41,6 +42,11 @@ class MACECalculator(Calculator):
 
         torch_tools.set_default_dtype(default_dtype)
 
+
+
+        # in the warm up, create the graph
+        self.graph_configured = False
+
     # pylint: disable=dangerous-default-value
     def calculate(self, atoms=None, properties=None, system_changes=all_changes):
         """
@@ -54,23 +60,67 @@ class MACECalculator(Calculator):
         Calculator.calculate(self, atoms)
 
         # prepare data
-        config = data.config_from_atoms(atoms)
-        data_loader = torch_geometric.dataloader.DataLoader(
-            dataset=[
-                data.AtomicData.from_config(
-                    config, z_table=self.z_table, cutoff=self.r_max
-                )
-            ],
-            batch_size=1,
-            shuffle=False,
-            drop_last=False,
-        )
-        batch = next(iter(data_loader)).to(self.device)
+        
+        # TODO: check that we are properly overwriting the 
+
+        if not self.graph_configured:
+            print("Warming up")
+            config = data.config_from_atoms(atoms)
+            data_loader = torch_geometric.dataloader.DataLoader(
+                dataset=[
+                    data.AtomicData.from_config(
+                        config, z_table=self.z_table, cutoff=self.r_max
+                    )
+                ],
+                batch_size=1,
+                shuffle=False,
+                drop_last=False,
+            )
+            self.batch = next(iter(data_loader)).to(self.device).to_dict()
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                for i in range(3):
+                    output = self.model(self.batch, compute_stress=False)
+            torch.cuda.current_stream().wait_stream(s)
+
+
+            self.g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(self.g):
+            #    Note: this will trace the GPU ops such that the replayed graphs will update self.output
+               self.output = self.model(self.batch, compute_stress=False)
+
+            # self.graph_configured = True
+
+        else:
+            print("Graph execution")
+            # update the inputs using the copy_ method
+            config = data.config_from_atoms(atoms)
+            data_loader = torch_geometric.dataloader.DataLoader(
+                dataset=[
+                    data.AtomicData.from_config(
+                        config, z_table=self.z_table, cutoff=self.r_max
+                    )
+                ],
+                batch_size=1,
+                shuffle=False,
+                drop_last=False,
+            )
+            new_batch = next(iter(data_loader)).to(self.device).to_dict()
+
+            # now copy the tensor data from the new batch to the old batch
+            for key, value in new_batch.items():
+                self.batch[key].data.copy_(value.data)
+            # Run the graph with the new inputs
+            self.g.replay()
+
+
+
+
 
         # predict + extract data
-        out = self.model(batch.to_dict(), compute_stress=True)
-        energy = out["energy"].detach().cpu().item()
-        forces = out["forces"].detach().cpu().numpy()
+        # out = self.model(batch.to_dict(), compute_stress=True)
+        energy = self.output["energy"].detach().cpu().item()
+        forces = self.output["forces"].detach().cpu().numpy()
 
         # store results
         E = energy * self.energy_units_to_eV
@@ -83,8 +133,8 @@ class MACECalculator(Calculator):
 
         # even though compute_stress is True, stress can be none if pbc is False
         # not sure if correct ASE thing is to have no dict key, or dict key with value None
-        if out["stress"] is not None:
-            stress = out["stress"].detach().cpu().numpy()
+        if self.output["stress"] is not None:
+            stress = self.output["stress"].detach().cpu().numpy()
             # stress has units eng / len^3:
             self.results["stress"] = (
                 stress * (self.energy_units_to_eV / self.length_units_to_A**3)
