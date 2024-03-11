@@ -19,8 +19,8 @@ from mace.tools import AtomicNumberTable
 Vector = np.ndarray  # [3,]
 Positions = np.ndarray  # [..., 3]
 Forces = np.ndarray  # [..., 3]
-Stress = np.ndarray  # [6, ]
-Virials = np.ndarray  # [3,3]
+Stress = np.ndarray  # [6, ], [3,3], [9, ]
+Virials = np.ndarray  # [6, ], [3,3], [9, ]
 Charges = np.ndarray  # [..., 1]
 Cell = np.ndarray  # [3,3]
 Pbc = tuple  # (3,)
@@ -211,16 +211,18 @@ def load_from_xyz(
         atoms_without_iso_atoms = []
 
         for idx, atoms in enumerate(atoms_list):
-            if len(atoms) == 1 and atoms.info["config_type"] == "IsolatedAtom":
-                if energy_key in atoms.info.keys():
-                    atomic_energies_dict[atoms.get_atomic_numbers()[0]] = atoms.info[
-                        energy_key
-                    ]
-                else:
-                    logging.warning(
-                        f"Configuration '{idx}' is marked as 'IsolatedAtom' "
-                        "but does not contain an energy."
-                    )
+            if len(atoms) == 1:
+                isolated_atom_config = atoms.info.get("config_type") == "IsolatedAtom"
+                if isolated_atom_config:
+                    if energy_key in atoms.info.keys():
+                        atomic_energies_dict[
+                            atoms.get_atomic_numbers()[0]
+                        ] = atoms.info[energy_key]
+                    else:
+                        logging.warning(
+                            f"Configuration '{idx}' is marked as 'IsolatedAtom' "
+                            "but does not contain an energy."
+                        )
             else:
                 atoms_without_iso_atoms.append(atoms)
 

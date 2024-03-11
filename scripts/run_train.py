@@ -671,6 +671,7 @@ def main() -> None:
     if args.distributed:
         torch.distributed.destroy_process_group()
 
+from mace.cli.run_train import main
 
 if __name__ == "__main__":
     main()

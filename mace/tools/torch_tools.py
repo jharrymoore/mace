@@ -49,13 +49,16 @@ def to_numpy(t: torch.Tensor) -> np.ndarray:
 
 
 def init_device(device_str: str) -> torch.device:
-    if device_str == "cuda":
+    if "cuda" in device_str:
         assert torch.cuda.is_available(), "No CUDA device available!"
+        if ":" in device_str:
+            # Check if the desired device is available
+            assert int(device_str.split(":")[-1]) < torch.cuda.device_count()
         logging.info(
             f"CUDA version: {torch.version.cuda}, CUDA device: {torch.cuda.current_device()}"
         )
         torch.cuda.init()
-        return torch.device("cuda")
+        return torch.device(device_str)
     if device_str == "mps":
         assert torch.backends.mps.is_available(), "No MPS backend is available!"
         logging.info("Using MPS GPU acceleration")
@@ -104,14 +107,25 @@ def cartesian_to_spherical(t: torch.Tensor):
 def voigt_to_matrix(t: torch.Tensor):
     """
     Convert voigt notation to matrix notation
-    :param t: (6,) tensor or (3, 3) tensor
+    :param t: (6,) tensor or (3, 3) tensor or (9,) tensor
     :return: (3, 3) tensor
     """
     if t.shape == (3, 3):
         return t
+    if t.shape == (6,):
+        return torch.tensor(
+            [
+                [t[0], t[5], t[4]],
+                [t[5], t[1], t[3]],
+                [t[4], t[3], t[2]],
+            ],
+            dtype=t.dtype,
+        )
+    if t.shape == (9,):
+        return t.view(3, 3)
 
-    return torch.tensor(
-        [[t[0], t[5], t[4]], [t[5], t[1], t[3]], [t[4], t[3], t[2]]], dtype=t.dtype
+    raise ValueError(
+        f"Stress tensor must be of shape (6,) or (3, 3), or (9,) but has shape {t.shape}"
     )
 
 
