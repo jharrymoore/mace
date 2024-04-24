@@ -1,6 +1,7 @@
 from .arg_parser import build_default_arg_parser, build_preprocess_arg_parser
 from .cg import U_matrix_real
 from .checkpoint import CheckpointHandler, CheckpointIO, CheckpointState
+from .finetuning_utils import load_foundations
 from .torch_tools import (
     TensorDict,
     cartesian_to_spherical,
@@ -67,4 +68,6 @@ __all__ = [
     "init_wandb",
     "build_preprocess_arg_parser",
     "DataParallelModel",
+    "load_foundations",
+    "build_preprocess_arg_parser",
 ]

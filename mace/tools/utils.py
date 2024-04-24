@@ -66,6 +66,8 @@ def setup_logger(
     
     logger.addFilter(lambda _ : (rank == 0))
 
+    logger.addFilter(lambda _: (rank == 0))
+
     if (directory is not None) and (tag is not None):
         os.makedirs(name=directory, exist_ok=True)
         path = os.path.join(directory, tag + ".log")

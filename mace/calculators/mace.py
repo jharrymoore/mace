@@ -11,6 +11,8 @@ from ase.stress import full_3x3_to_voigt_6_stress
 
 from mace import data
 from mace.tools import torch_geometric, torch_tools, utils
+from mace.tools.compile import prepare
+from mace.tools.scripts_utils import extract_load
 
 
 class MACECalculator(Calculator):
@@ -24,14 +26,90 @@ class MACECalculator(Calculator):
         device: str,
         energy_units_to_eV: float = 1.0,
         length_units_to_A: float = 1.0,
-        default_dtype="float64",
-        **kwargs
+        default_dtype="",
+        charges_key="Qs",
+        model_type="MACE",
+        compile_mode=None,
+        **kwargs,
     ):
         Calculator.__init__(self, **kwargs)
         self.results = {}
 
-        self.model = torch.load(f=model_path, map_location=device)
-        self.r_max = float(self.model.r_max)
+        self.model_type = model_type
+
+        if model_type == "MACE":
+            self.implemented_properties = [
+                "energy",
+                "free_energy",
+                "node_energy",
+                "forces",
+                "stress",
+            ]
+        elif model_type == "DipoleMACE":
+            self.implemented_properties = ["dipole"]
+        elif model_type == "EnergyDipoleMACE":
+            self.implemented_properties = [
+                "energy",
+                "free_energy",
+                "node_energy",
+                "forces",
+                "stress",
+                "dipole",
+            ]
+        else:
+            raise ValueError(
+                f"Give a valid model_type: [MACE, DipoleMACE, EnergyDipoleMACE], {model_type} not supported"
+            )
+
+        if "model_path" in kwargs:
+            print("model_path argument deprecated, use model_paths")
+            model_paths = kwargs["model_path"]
+
+        if isinstance(model_paths, str):
+            # Find all models that satisfy the wildcard (e.g. mace_model_*.pt)
+            model_paths_glob = glob(model_paths)
+            if len(model_paths_glob) == 0:
+                raise ValueError(f"Couldn't find MACE model files: {model_paths}")
+            model_paths = model_paths_glob
+        elif isinstance(model_paths, Path):
+            model_paths = [model_paths]
+        if len(model_paths) == 0:
+            raise ValueError("No mace file names supplied")
+        self.num_models = len(model_paths)
+        if len(model_paths) > 1:
+            print(f"Running committee mace with {len(model_paths)} models")
+            if model_type in ["MACE", "EnergyDipoleMACE"]:
+                self.implemented_properties.extend(
+                    ["energies", "energy_var", "forces_comm", "stress_var"]
+                )
+            elif model_type == "DipoleMACE":
+                self.implemented_properties.extend(["dipole_var"])
+        if compile_mode is not None:
+            print(f"Torch compile is enabled with mode: {compile_mode}")
+            self.models = [
+                torch.compile(
+                    prepare(extract_load)(f=model_path, map_location=device),
+                    mode=compile_mode,
+                    fullgraph=True,
+                )
+                for model_path in model_paths
+            ]
+            self.use_compile = True
+        else:
+            self.models = [
+                torch.load(f=model_path, map_location=device)
+                for model_path in model_paths
+            ]
+            self.use_compile = False
+        for model in self.models:
+            model.to(device)  # shouldn't be necessary but seems to help with GPU
+        r_maxs = [model.r_max.cpu() for model in self.models]
+        r_maxs = np.array(r_maxs)
+        assert np.all(
+            r_maxs == r_maxs[0]
+        ), "committee r_max are not all the same {' '.join(r_maxs)}"
+        self.r_max = float(r_maxs[0])
+
         self.device = torch_tools.init_device(device)
         self.energy_units_to_eV = energy_units_to_eV
         self.length_units_to_A = length_units_to_A
@@ -125,6 +203,13 @@ class DipoleMACECalculator(Calculator):
 
         torch_tools.set_default_dtype(default_dtype)
 
+    def _prepare_batch(self, batch):
+        batch_clone = batch.clone()
+        if self.use_compile:
+            batch_clone["node_attrs"].requires_grad_(True)
+            batch_clone["positions"].requires_grad_(True)
+        return batch_clone
+
     # pylint: disable=dangerous-default-value
     def calculate(self, atoms=None, properties=None, system_changes=all_changes):
         """
@@ -151,14 +236,32 @@ class DipoleMACECalculator(Calculator):
         )
         batch = next(iter(data_loader)).to(self.device)
 
-        # predict + extract data
-        out = self.model(batch)
-        dipole = out["dipole"].detach().cpu().numpy()
+        if self.model_type in ["MACE", "EnergyDipoleMACE"]:
+            batch = next(iter(data_loader)).to(self.device)
+            node_e0 = self.models[0].atomic_energies_fn(batch["node_attrs"])
+            compute_stress = not self.use_compile
+        else:
+            compute_stress = False
 
-        # store results
-        self.results = {
-            "dipole": dipole,
-        }
+        batch_base = next(iter(data_loader)).to(self.device)
+        ret_tensors = self._create_result_tensors(
+            self.model_type, self.num_models, len(atoms)
+        )
+        for i, model in enumerate(self.models):
+            batch = self._prepare_batch(batch_base)
+            out = model(
+                batch.to_dict(),
+                compute_stress=compute_stress,
+                training=self.use_compile,
+            )
+            if self.model_type in ["MACE", "EnergyDipoleMACE"]:
+                ret_tensors["energies"][i] = out["energy"].detach()
+                ret_tensors["node_energy"][i] = (out["node_energy"] - node_e0).detach()
+                ret_tensors["forces"][i] = out["forces"].detach()
+                if out["stress"] is not None:
+                    ret_tensors["stress"][i] = out["stress"].detach()
+            if self.model_type in ["DipoleMACE", "EnergyDipoleMACE"]:
+                ret_tensors["dipole"][i] = out["dipole"].detach()
 
 
 class EnergyDipoleMACECalculator(Calculator):

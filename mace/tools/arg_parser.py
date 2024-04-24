@@ -5,12 +5,25 @@
 ###########################################################################################
 
 import argparse
-from typing import Optional
 import os
+from typing import Optional
 
 
 def build_default_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
+    try:
+        import configargparse
+
+        parser = configargparse.ArgumentParser(
+            config_file_parser_class=configargparse.YAMLConfigFileParser,
+        )
+        parser.add(
+            "--config",
+            type=str,
+            is_config_file=True,
+            help="config file to agregate options",
+        )
+    except ImportError:
+        parser = argparse.ArgumentParser()
 
     # Name and seed
     parser.add_argument("--name", help="experiment name", required=True)
@@ -91,9 +104,14 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         ],
     )
     parser.add_argument(
-        "--r_max", help="distance cutoff (in Ang)", 
-        type=float, 
-        default=5.0
+        "--r_max", help="distance cutoff (in Ang)", type=float, default=5.0
+    )
+    parser.add_argument(
+        "--radial_type",
+        help="type of radial basis functions",
+        type=str,
+        default="bessel",
+        choices=["bessel", "gaussian", "chebyshev"],
     )
     parser.add_argument(
         "--num_radial_basis",
@@ -106,6 +124,18 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         help="number of basis functions for smooth cutoff",
         type=int,
         default=5,
+    )
+    parser.add_argument(
+        "--pair_repulsion",
+        help="use amsgrad variant of optimizer",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--distance_transform",
+        help="use distance transform for radial basis functions",
+        default="None",
+        choices=["None", "Agnesi", "Soft"],
     )
     parser.add_argument(
         "--interaction",
@@ -202,7 +232,9 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
 
     # Dataset
     parser.add_argument(
-        "--train_file", help="Training set file, format is .xyz or .h5", type=str, 
+        "--train_file",
+        help="Training set file, format is .xyz or .h5",
+        type=str,
         required=True,
     )
     parser.add_argument(
@@ -247,7 +279,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--pin_memory",
         help="Pin memory for data loading",
-        default=True, 
+        default=True,
         type=bool,
     )
     parser.add_argument(
@@ -284,6 +316,12 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         required=False,
+    )
+    parser.add_argument(
+        "--keep_isolated_atoms",
+        help="Keep isolated atoms in the dataset, useful for transfer learning",
+        type=bool,
+        default=False,
     )
     parser.add_argument(
         "--energy_key",
@@ -334,6 +372,8 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "virials",
             "stress",
             "dipole",
+            "huber",
+            "universal",
             "energy_forces_dipole",
         ],
     )
@@ -463,11 +503,29 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=2048,
     )
     parser.add_argument(
+        "--foundation_model",
+        help="Path to the foundation model for transfer learning",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--foundation_model_readout",
+        help="Use readout of foundation model for transfer learning",
+        action="store_false",
+        default=True,
+    )
+    parser.add_argument(
         "--eval_interval", help="evaluate model every <n> epochs", type=int, default=2
     )
     parser.add_argument(
         "--keep_checkpoints",
         help="keep all checkpoints",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--save_all_checkpoints",
+        help="save all checkpoints",
         action="store_true",
         default=False,
     )
@@ -641,6 +699,142 @@ def build_preprocess_arg_parser() -> argparse.ArgumentParser:
         "--batch_size", 
         help="batch size to compute average number of neighbours", 
         type=int, 
+        default=16,
+    )
+
+    parser.add_argument(
+        "--scaling",
+        help="type of scaling to the output",
+        type=str,
+        default="rms_forces_scaling",
+        choices=["std_scaling", "rms_forces_scaling", "no_scaling"],
+    )
+    parser.add_argument(
+        "--E0s",
+        help="Dictionary of isolated atom energies",
+        type=str,
+        default=None,
+        required=False,
+    )
+    parser.add_argument(
+        "--shuffle",
+        help="Shuffle the training dataset",
+        type=bool,
+        default=True,
+    )
+    parser.add_argument(
+        "--seed",
+        help="Random seed for splitting training and validation sets",
+        type=int,
+        default=123,
+    )
+    return parser
+
+
+def build_preprocess_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--train_file",
+        help="Training set h5 file",
+        type=str,
+        default=None,
+        required=True,
+    )
+    parser.add_argument(
+        "--valid_file",
+        help="Training set xyz file",
+        type=str,
+        default=None,
+        required=False,
+    )
+    parser.add_argument(
+        "--num_process",
+        help="The user defined number of processes to use, as well as the number of files created.",
+        type=int,
+        default=int(os.cpu_count() / 4),
+    )
+    parser.add_argument(
+        "--valid_fraction",
+        help="Fraction of training set used for validation",
+        type=float,
+        default=0.1,
+        required=False,
+    )
+    parser.add_argument(
+        "--test_file",
+        help="Test set xyz file",
+        type=str,
+        default=None,
+        required=False,
+    )
+    parser.add_argument(
+        "--h5_prefix",
+        help="Prefix for h5 files when saving",
+        type=str,
+        default="",
+    )
+    parser.add_argument(
+        "--r_max", help="distance cutoff (in Ang)", type=float, default=5.0
+    )
+    parser.add_argument(
+        "--config_type_weights",
+        help="String of dictionary containing the weights for each config type",
+        type=str,
+        default='{"Default":1.0}',
+    )
+    parser.add_argument(
+        "--energy_key",
+        help="Key of reference energies in training xyz",
+        type=str,
+        default="energy",
+    )
+    parser.add_argument(
+        "--forces_key",
+        help="Key of reference forces in training xyz",
+        type=str,
+        default="forces",
+    )
+    parser.add_argument(
+        "--virials_key",
+        help="Key of reference virials in training xyz",
+        type=str,
+        default="virials",
+    )
+    parser.add_argument(
+        "--stress_key",
+        help="Key of reference stress in training xyz",
+        type=str,
+        default="stress",
+    )
+    parser.add_argument(
+        "--dipole_key",
+        help="Key of reference dipoles in training xyz",
+        type=str,
+        default="dipole",
+    )
+    parser.add_argument(
+        "--charges_key",
+        help="Key of atomic charges in training xyz",
+        type=str,
+        default="charges",
+    )
+    parser.add_argument(
+        "--atomic_numbers",
+        help="List of atomic numbers",
+        type=str,
+        default=None,
+        required=False,
+    )
+    parser.add_argument(
+        "--compute_statistics",
+        help="Compute statistics for the dataset",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--batch_size",
+        help="batch size to compute average number of neighbours",
+        type=int,
         default=16,
     )
 

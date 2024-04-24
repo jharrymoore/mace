@@ -21,7 +21,7 @@ from .blocks import (
 )
 from .loss import (
     DipoleSingleLoss,
-    EnergyForcesLoss,
+    UniversalLoss,
     WeightedEnergyForcesDipoleLoss,
     WeightedEnergyForcesLoss,
     WeightedEnergyForcesStressLoss,
@@ -36,7 +36,7 @@ from .models import (
     ScaleShiftBOTNet,
     ScaleShiftMACE,
 )
-from .radial import BesselBasis, PolynomialCutoff
+from .radial import BesselBasis, GaussianBasis, PolynomialCutoff, ZBLBasis
 from .symmetric_contraction import SymmetricContraction
 from .utils import (
     compute_avg_num_neighbors,
@@ -71,6 +71,7 @@ gate_dict: Dict[str, Optional[Callable]] = {
 __all__ = [
     "AtomicEnergiesBlock",
     "RadialEmbeddingBlock",
+    "ZBLBasis",
     "LinearNodeEmbeddingBlock",
     "LinearReadoutBlock",
     "EquivariantProductBasisBlock",
@@ -94,6 +95,8 @@ __all__ = [
     "WeightedEnergyForcesStressLoss",
     "DipoleSingleLoss",
     "WeightedEnergyForcesDipoleLoss",
+    "WeightedHuberEnergyForcesStressLoss",
+    "UniversalLoss",
     "SymmetricContraction",
     "interaction_classes",
     "compute_mean_std_atomic_inter_energy",

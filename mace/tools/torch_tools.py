@@ -5,6 +5,7 @@
 ###########################################################################################
 
 import logging
+from contextlib import contextmanager
 from typing import Dict
 
 import numpy as np
@@ -81,17 +82,6 @@ def set_default_dtype(dtype: str) -> None:
     torch.set_default_dtype(dtype_dict[dtype])
 
 
-def get_complex_default_dtype():
-    default_dtype = torch.get_default_dtype()
-    if default_dtype == torch.float64:
-        return torch.complex128
-
-    if default_dtype == torch.float32:
-        return torch.complex64
-
-    raise NotImplementedError
-
-
 def spherical_to_cartesian(t: torch.Tensor):
     """
     Convert spherical notation to cartesian notation
@@ -149,3 +139,14 @@ class DataParallelModel(torch.nn.Module):
             return super().__getattr__(name)
         except AttributeError:
             return getattr(self.model.module, name)
+@contextmanager
+def default_dtype(dtype: torch.dtype):
+    """Context manager for configuring the default_dtype used by torch
+
+    Args:
+        dtype (torch.dtype): the default dtype to use within this context manager
+    """
+    init = torch.get_default_dtype()
+    torch.set_default_dtype(dtype)
+    yield
+    torch.set_default_dtype(init)

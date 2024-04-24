@@ -1,4 +1,3 @@
-from __future__ import annotations
 ###########################################################################################
 # Slurm environment setup for distributed training.
 # This code is refactored from rsarm's contribution at:
@@ -7,6 +6,7 @@ from __future__ import annotations
 ###########################################################################################
 
 import os
+
 import hostlist
 
 
