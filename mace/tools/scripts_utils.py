@@ -381,6 +381,38 @@ def custom_key(key):
     return (2, key)
 
 
+# class LRScheduler:
+#     def __init__(self, optimizer, args) -> None:
+#         self.scheduler = args.scheduler
+#         if args.scheduler == "ExponentialLR":
+#             self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
+#                 optimizer=optimizer, gamma=args.lr_scheduler_gamma
+#             )
+#         elif args.scheduler == "ReduceLROnPlateau":
+#             self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+#                 optimizer=optimizer,
+#                 factor=args.lr_factor,
+#                 patience=args.scheduler_patience,
+#             )
+#             # catch if colections.train not defined above
+#             try:
+#                 assert train_collection is not None
+#                 atomic_energies_dict = data.compute_average_E0s(
+#                     train_collection, z_table
+#                 )
+#             except Exception as e:
+#                 raise RuntimeError(
+#                     f"Could not compute average E0s if no training xyz given, error {e} occured"
+#                 ) from e
+#         else:
+#             try:
+#                 atomic_energies_dict = ast.literal_eval(E0s)
+#                 assert isinstance(atomic_energies_dict, dict)
+#             except Exception as e:
+#                 raise RuntimeError(
+#                     f"E0s specified invalidly, error {e} occured"
+#                 ) from e
+#
 class LRScheduler:
     def __init__(self, optimizer, args) -> None:
         self.scheduler = args.scheduler
@@ -394,29 +426,21 @@ class LRScheduler:
                 factor=args.lr_factor,
                 patience=args.scheduler_patience,
             )
-            # catch if colections.train not defined above
-            try:
-                assert train_collection is not None
-                atomic_energies_dict = data.compute_average_E0s(
-                    train_collection, z_table
-                )
-            except Exception as e:
-                raise RuntimeError(
-                    f"Could not compute average E0s if no training xyz given, error {e} occured"
-                ) from e
         else:
-            try:
-                atomic_energies_dict = ast.literal_eval(E0s)
-                assert isinstance(atomic_energies_dict, dict)
-            except Exception as e:
-                raise RuntimeError(
-                    f"E0s specified invalidly, error {e} occured"
-                ) from e
-    else:
-        raise RuntimeError(
-            "E0s not found in training file and not specified in command line"
-        )
-    return atomic_energies_dict
+            raise RuntimeError(f"Unknown scheduler: '{args.scheduler}'")
+
+    def step(self, metrics=None, epoch=None):  # pylint: disable=E1123
+        if self.scheduler == "ExponentialLR":
+            self.lr_scheduler.step(epoch=epoch)
+        elif self.scheduler == "ReduceLROnPlateau":
+            self.lr_scheduler.step(  # pylint: disable=E1123
+                metrics=metrics, epoch=epoch
+            )
+
+    def __getattr__(self, name):
+        if name == "step":
+            return self.step
+        return getattr(self.lr_scheduler, name)
 
 def get_loss_fn(loss: str,
                 energy_weight: float,

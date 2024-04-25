@@ -5,7 +5,7 @@
 ###########################################################################################
 
 from abc import abstractmethod
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Optional, Tuple, Union, List
 
 import numpy as np
 import torch.nn.functional
@@ -228,7 +228,6 @@ class EquivariantProductBasisBlock(torch.nn.Module):
             return self.linear(node_feats) + sc
         return self.linear(node_feats)
 
-
 @compile_mode("script")
 class InteractionBlock(torch.nn.Module):
     def __init__(
@@ -240,6 +239,7 @@ class InteractionBlock(torch.nn.Module):
         target_irreps: o3.Irreps,
         hidden_irreps: o3.Irreps,
         avg_num_neighbors: float,
+        radial_MLP: Optional[List[int]] = None,
     ) -> None:
         super().__init__()
         self.node_attrs_irreps = node_attrs_irreps
@@ -249,6 +249,9 @@ class InteractionBlock(torch.nn.Module):
         self.target_irreps = target_irreps
         self.hidden_irreps = hidden_irreps
         self.avg_num_neighbors = avg_num_neighbors
+        if radial_MLP is None:
+            radial_MLP = [64, 64, 64]
+        self.radial_MLP = radial_MLP
 
         self._setup()
 
@@ -266,6 +269,45 @@ class InteractionBlock(torch.nn.Module):
         edge_index: torch.Tensor,
     ) -> torch.Tensor:
         raise NotImplementedError
+
+
+# V@compile_mode("script")
+# class InteractionBlock(torch.nn.Module):
+#     def __init__(
+#         self,
+#         node_attrs_irreps: o3.Irreps,
+#         node_feats_irreps: o3.Irreps,
+#         edge_attrs_irreps: o3.Irreps,
+#         edge_feats_irreps: o3.Irreps,
+#         target_irreps: o3.Irreps,
+#         hidden_irreps: o3.Irreps,
+#         avg_num_neighbors: float,
+#     ) -> None:
+#         super().__init__()
+#         self.node_attrs_irreps = node_attrs_irreps
+#         self.node_feats_irreps = node_feats_irreps
+#         self.edge_attrs_irreps = edge_attrs_irreps
+#         self.edge_feats_irreps = edge_feats_irreps
+#         self.target_irreps = target_irreps
+#         self.hidden_irreps = hidden_irreps
+#         self.avg_num_neighbors = avg_num_neighbors
+#
+#         self._setup()
+#
+#     @abstractmethod
+#     def _setup(self) -> None:
+#         raise NotImplementedError
+#
+#     @abstractmethod
+#     def forward(
+#         self,
+#         node_attrs: torch.Tensor,
+#         node_feats: torch.Tensor,
+#         edge_attrs: torch.Tensor,
+#         edge_feats: torch.Tensor,
+#         edge_index: torch.Tensor,
+#     ) -> torch.Tensor:
+#         raise NotImplementedError
 
 
 nonlinearities = {1: torch.nn.functional.silu, -1: torch.tanh}

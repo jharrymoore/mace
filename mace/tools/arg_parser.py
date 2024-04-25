@@ -54,7 +54,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "--device",
         help="select device",
         type=str,
-        choices=["cpu", "cuda", "mps"],
+        choices=["cpu", "cuda", "mps", "xpu"],
         default="cpu",
     )
     parser.add_argument(
@@ -112,6 +112,12 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default="bessel",
         choices=["bessel", "gaussian", "chebyshev"],
+    )
+    parser.add_argument(
+        "--radial_MLP",
+        help="width of the radial MLP",
+        type=str,
+        default="[64, 64, 64]",
     )
     parser.add_argument(
         "--num_radial_basis",
